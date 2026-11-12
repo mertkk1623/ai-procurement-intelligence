@@ -49,6 +49,7 @@ __all__ = [
     "TemplateInfo",
     "UnsupportedFormatError",
     "VatDeclarationError",
+    "WorkbookStructure",
     "parse_workbook",
 ]
 
@@ -251,6 +252,41 @@ class SupplierQuote:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbookStructure:
+    """Dosyanın yapısal tespit sonucu.
+
+    Parser yalnızca *tespit* eder; bu bilgilerin hangi doğrulama kodunu
+    üreteceğine Validator karar verir. Böylece eksik sayfa/başlık gibi
+    durumlar da bulgu olarak raporlanabilir.
+    """
+
+    sheet_names: tuple[str, ...]
+    missing_sheets: tuple[str, ...]
+    extra_sheets: tuple[str, ...]
+    #: Başlık satırında bulunan tanınmış başlıklar ve sütun indeksleri.
+    header_order: tuple[tuple[str, int], ...]
+    #: Beklenen ama bulunamayan başlıklar.
+    missing_headers: tuple[str, ...]
+    #: Tanınmayan, veri olarak kullanılmayan başlıklar (başlık, sütun).
+    unknown_headers: tuple[tuple[str, int], ...]
+    #: Beklenen başlığa benzeyen ama birebir eşleşmeyen başlıklar
+    #: (okunan başlık, beklenen başlık, sütun).
+    misspelled_headers: tuple[tuple[str, str, int], ...]
+    #: Birden fazla sütunda geçen başlıklar ve mükerrer (fazladan) sütun.
+    duplicate_headers: tuple[tuple[str, int], ...]
+
+    @property
+    def required_columns_present(self) -> bool:
+        """14 zorunlu başlığın tamamı birebir mevcut mu."""
+        return not self.missing_headers and not self.misspelled_headers
+
+    @property
+    def header_columns(self) -> dict[str, int]:
+        """Başlık adı -> sütun indeksi eşlemesi."""
+        return dict(self.header_order)
+
+
+@dataclass(frozen=True, slots=True)
 class ParsedWorkbook:
     """Ayrıştırma sonucu: şablon bilgisi, RFQ ve tedarikçi satırları."""
 
@@ -258,6 +294,7 @@ class ParsedWorkbook:
     template: TemplateInfo
     rfq: RfqData
     suppliers: tuple[SupplierQuote, ...]
+    structure: WorkbookStructure
 
 
 # --------------------------------------------------------------------------- #
@@ -376,6 +413,33 @@ def _read_template(workbook: Workbook) -> TemplateInfo:
     )
 
 
+def _require_template(template: TemplateInfo | None) -> TemplateInfo:
+    assert template is not None
+    return template
+
+
+def _empty_template() -> TemplateInfo:
+    """Sayfa hiç yoksa kullanılan boş şablon bilgisi."""
+    return TemplateInfo(code=None, version=None, vat_declaration=None)
+
+
+def _empty_rfq() -> RfqData:
+    """RFQ sayfası hiç yoksa kullanılan boş talep bilgisi."""
+    return RfqData(
+        rfq_number=None,
+        rfq_date=None,
+        product_code=None,
+        profile_specification=None,
+        length_m=None,
+        wall_thickness_mm=None,
+        quantity_pcs=None,
+        delivery_location=None,
+        requested_delivery_days=None,
+        currency=None,
+        description=None,
+    )
+
+
 def _require_vat_declaration(template: TemplateInfo) -> None:
     declared = template.vat_declaration
     value = declared.strip().upper() if isinstance(declared, str) else ""
@@ -396,7 +460,7 @@ def _require_vat_declaration(template: TemplateInfo) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _read_rfq(workbook: Workbook) -> RfqData:
+def _read_rfq(workbook: Workbook, *, strict: bool = True) -> RfqData:
     sheet = workbook[SHEET_RFQ]
 
     positions: dict[str, int] = {}
@@ -418,6 +482,9 @@ def _read_rfq(workbook: Workbook) -> RfqData:
     for expected_row, label, attr in RFQ_FIELDS:
         row = positions.get(label)
         if row is None:
+            if not strict:
+                values[attr] = None
+                continue
             raise MissingFieldError(
                 f"RFQ alanı bulunamadı: '{label}' "
                 f"({SHEET_RFQ}!A{expected_row} bekleniyordu).",
@@ -445,29 +512,147 @@ def _read_header_label(sheet: Worksheet, column: int) -> str:
     return _normalize_text(sheet.cell(row=HEADER_ROW, column=column).value)
 
 
-def _map_headers(sheet: Worksheet) -> dict[str, int]:
-    """Başlık adı -> sütun indeksi eşlemesi üretir ve zorunlu başlıkları doğrular."""
-    expected = set(SUPPLIER_QUOTE_HEADERS)
-    mapping: dict[str, int] = {}
+def _header_key(value: str) -> str:
+    """Başlık karşılaştırması için büyük/küçük harf ve boşluk duyarsız anahtar."""
+    return " ".join(value.lower().split())
 
+
+def _inspect_headers(
+    sheet: Worksheet,
+) -> tuple[tuple[str, int], ...]:
+    """Başlık satırını tarar ve (başlık, sütun) çiftlerini döndürür.
+
+    Yalnızca dolu hücreler döner; tanınan/tanınmayan ayrımı çağırana aittir.
+    """
+    found: list[tuple[str, int]] = []
     for column in range(1, sheet.max_column + 1):
-        header = _read_header_label(sheet, column)
-        if header not in expected:
-            # Bilinmeyen sütunlar veri olarak kullanılmaz; doğrulama katmanı
-            # bunları W-HDR-01 ile bildirecek.
-            continue
-        if header in mapping:
-            raise DuplicateHeaderError(
-                f"Başlık birden fazla sütunda tanımlı: '{header}' "
-                f"({sheet.cell(row=HEADER_ROW, column=mapping[header]).coordinate} ve "
-                f"{sheet.cell(row=HEADER_ROW, column=column).coordinate}).",
-                sheet=sheet.title,
-                cell=sheet.cell(row=HEADER_ROW, column=column).coordinate,
-                field=header,
-            )
-        mapping[header] = column
+        label = _read_header_label(sheet, column)
+        if label:
+            found.append((label, column))
+    return tuple(found)
 
-    missing = [header for header in SUPPLIER_QUOTE_HEADERS if header not in mapping]
+
+def _classify_headers(
+    found: tuple[tuple[str, int], ...],
+) -> tuple[
+    tuple[tuple[str, int], ...],
+    tuple[str, ...],
+    tuple[tuple[str, int], ...],
+    tuple[tuple[str, str, int], ...],
+    tuple[tuple[str, int], ...],
+]:
+    """Başlıkları tanınan / eksik / bilinmeyen / yazımı bozuk / mükerrer olarak ayırır."""
+    expected = SUPPLIER_QUOTE_HEADERS
+    expected_keys = {_header_key(name): name for name in expected}
+
+    recognized: list[tuple[str, int]] = []
+    unknown: list[tuple[str, int]] = []
+    misspelled: list[tuple[str, str, int]] = []
+    duplicates: list[tuple[str, int]] = []
+    seen: set[str] = set()
+
+    for label, column in found:
+        if label in expected:
+            if label in seen:
+                duplicates.append((label, column))
+                continue
+            seen.add(label)
+            recognized.append((label, column))
+            continue
+
+        # Birebir değil ama normalize edilmiş hali beklenen bir başlığa
+        # eşitse bu bir yazım/boşluk/harf farkıdır (E-HDR-01).
+        candidate = expected_keys.get(_header_key(label))
+        if candidate is not None:
+            misspelled.append((label, candidate, column))
+        else:
+            unknown.append((label, column))
+
+    missing = tuple(name for name in expected if name not in seen)
+    return (
+        tuple(recognized),
+        missing,
+        tuple(unknown),
+        tuple(misspelled),
+        tuple(duplicates),
+    )
+
+
+def _inspect_structure(workbook: Workbook) -> WorkbookStructure:
+    """Dosyanın yapısal durumunu istisna fırlatmadan tespit eder."""
+    present = tuple(workbook.sheetnames)
+    missing_sheets = tuple(name for name in EXPECTED_SHEETS if name not in present)
+    extra_sheets = tuple(name for name in present if name not in EXPECTED_SHEETS)
+
+    if SHEET_QUOTES in present:
+        found = _inspect_headers(workbook[SHEET_QUOTES])
+        (
+            header_order,
+            missing_headers,
+            unknown_headers,
+            misspelled_headers,
+            duplicate_headers,
+        ) = _classify_headers(found)
+    else:
+        header_order = ()
+        missing_headers = SUPPLIER_QUOTE_HEADERS
+        unknown_headers = ()
+        misspelled_headers = ()
+        duplicate_headers = ()
+
+    return WorkbookStructure(
+        sheet_names=present,
+        missing_sheets=missing_sheets,
+        extra_sheets=extra_sheets,
+        header_order=header_order,
+        missing_headers=missing_headers,
+        unknown_headers=unknown_headers,
+        misspelled_headers=misspelled_headers,
+        duplicate_headers=duplicate_headers,
+    )
+
+
+def _map_headers(sheet: Worksheet, *, strict: bool = True) -> dict[str, int]:
+    """Başlık adı -> sütun indeksi eşlemesi üretir.
+
+    ``strict=True`` (varsayılan) eksik başlıkta istisna fırlatır; mevcut
+    davranış korunur. ``strict=False`` ise eşleşen başlıklarla devam eder ve
+    eksikleri Validator'ın raporlamasına bırakır.
+    """
+    found = _inspect_headers(sheet)
+    (
+        recognized,
+        missing,
+        _unknown,
+        misspelled,
+        duplicates,
+    ) = _classify_headers(found)
+
+    if not strict:
+        return dict(recognized)
+
+    if duplicates:
+        duplicate, duplicate_column = duplicates[0]
+        columns = [column for label, column in found if label == duplicate]
+        raise DuplicateHeaderError(
+            f"Başlık birden fazla sütunda tanımlı: '{duplicate}' "
+            f"({', '.join(sheet.cell(row=HEADER_ROW, column=c).coordinate for c in columns)}).",
+            sheet=sheet.title,
+            cell=sheet.cell(row=HEADER_ROW, column=duplicate_column).coordinate,
+            field=duplicate,
+        )
+
+    if misspelled:
+        label, expected_name, column = misspelled[0]
+        raise MissingHeaderError(
+            f"Başlık yazımı beklenenle eşleşmiyor: {sheet.title}!"
+            f"{sheet.cell(row=HEADER_ROW, column=column).coordinate} = '{label}', "
+            f"beklenen '{expected_name}'.",
+            sheet=sheet.title,
+            cell=sheet.cell(row=HEADER_ROW, column=column).coordinate,
+            field=expected_name,
+        )
+
     if missing:
         raise MissingHeaderError(
             f"Zorunlu sütun başlığı/baslıkları eksik: {', '.join(missing)}. "
@@ -477,12 +662,14 @@ def _map_headers(sheet: Worksheet) -> dict[str, int]:
             field=", ".join(missing),
         )
 
-    return mapping
+    return dict(recognized)
 
 
-def _read_suppliers(workbook: Workbook) -> tuple[SupplierQuote, ...]:
+def _read_suppliers(
+    workbook: Workbook, *, strict: bool = True
+) -> tuple[SupplierQuote, ...]:
     sheet = workbook[SHEET_QUOTES]
-    mapping = _map_headers(sheet)
+    mapping = _map_headers(sheet, strict=strict)
 
     last_row = min(sheet.max_row, LAST_DATA_ROW)
     quotes: list[SupplierQuote] = []
@@ -495,10 +682,15 @@ def _read_suppliers(workbook: Workbook) -> tuple[SupplierQuote, ...]:
         if all(value is None for value in raw.values()):
             continue
 
+        # ``strict=False`` modunda eksik başlıklar olabilir; okunamayan alan
+        # ``None`` kalır ve eksikliği Validator raporlar.
         quotes.append(
             SupplierQuote(
                 row_number=row,
-                **{attr: raw[header] for header, attr in _HEADER_TO_ATTR.items()},
+                **{
+                    attr: raw.get(header)
+                    for header, attr in _HEADER_TO_ATTR.items()
+                },
             )
         )
 
@@ -510,11 +702,16 @@ def _read_suppliers(workbook: Workbook) -> tuple[SupplierQuote, ...]:
 # --------------------------------------------------------------------------- #
 
 
-def parse_workbook(source: str | Path) -> ParsedWorkbook:
-    """Şablon dosyasını okur ve doğrulanmış yapısal sonucu döndürür.
+def parse_workbook(source: str | Path, *, strict: bool = True) -> ParsedWorkbook:
+    """Şablon dosyasını okur ve yapısal sonucu döndürür.
 
     Args:
         source: Okunacak ``.xlsx`` dosyasının yolu. Dosya değiştirilmez.
+        strict: ``True`` (varsayılan) ise yapısal eksiklikler istisna olarak
+            fırlatılır; mevcut davranış budur. ``False`` ise eksik sayfa ve
+            başlıklar istisna yerine :attr:`ParsedWorkbook.structure` içinde
+            raporlanır ve okunabilen alanlarla devam edilir. Validator
+            yapısal kodları üretebilmek için bu modu kullanır.
 
     Raises:
         ExcelParserError: Dosya açılamıyor, yapı beklentileri karşılanmıyor
@@ -526,16 +723,27 @@ def parse_workbook(source: str | Path) -> ParsedWorkbook:
 
     workbook = _open_workbook(path)
     try:
-        _require_sheets(workbook)
+        structure = _inspect_structure(workbook)
+        if strict:
+            _require_sheets(workbook)
 
-        template = _read_template(workbook)
-        _require_vat_declaration(template)
+        template = _read_template(workbook) if SHEET_INSTRUCTIONS in workbook.sheetnames else None
+        if strict:
+            _require_vat_declaration(_require_template(template))
+
+        rfq = _read_rfq(workbook, strict=strict) if SHEET_RFQ in workbook.sheetnames else None
+        suppliers = (
+            _read_suppliers(workbook, strict=strict)
+            if SHEET_QUOTES in workbook.sheetnames
+            else ()
+        )
 
         return ParsedWorkbook(
             source_path=path,
-            template=template,
-            rfq=_read_rfq(workbook),
-            suppliers=_read_suppliers(workbook),
+            template=template if template is not None else _empty_template(),
+            rfq=rfq if rfq is not None else _empty_rfq(),
+            suppliers=suppliers,
+            structure=structure,
         )
     finally:
         workbook.close()
