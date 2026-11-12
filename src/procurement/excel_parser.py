@@ -353,7 +353,11 @@ def _read_cell(
 
 def _validate_file(path: Path) -> None:
     if not path.exists() or not path.is_file():
-        raise ExcelParserError(f"Dosya bulunamadı: {path}")
+        raise ExcelParserError(
+            "Dosya bulunamadı. Dosyanın silinmediğinden veya taşınmadığından "
+            "emin olup yeniden yükleyin.",
+            field="file",
+        )
 
     suffix = path.suffix.lower()
     if suffix != ALLOWED_SUFFIX:
@@ -382,8 +386,13 @@ def _open_workbook(path: Path) -> Workbook:
             read_only=False,
         )
     except (InvalidFileException, zipfile.BadZipFile, OSError, KeyError, ValueError) as exc:
+        # Yol ve teknik ayrıntı kullanıcıya gösterilmez; özgün hata
+        # ``__cause__`` üzerinde korunur (hata ayıklama/loglama için).
         raise ExcelParserError(
-            f"Dosya açılamadı veya geçerli bir .xlsx değil: {path} ({exc})"
+            "Dosya açılamadı veya geçerli bir .xlsx değil. Dosyanın bozuk "
+            "olmadığından ve Excel biçiminde kaydedildiğinden emin olup "
+            "yeniden yükleyin.",
+            field="file",
         ) from exc
 
 

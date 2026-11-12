@@ -134,6 +134,82 @@ def test_initial_screen_does_not_show_costs():
 
 
 # --------------------------------------------------------------------------- #
+# Şablon indirme
+# --------------------------------------------------------------------------- #
+
+
+def test_template_download_is_available_on_start_screen():
+    """Şablon, dosya yüklenmeden indirilebilir; rapor butonlarıyla karışmaz."""
+    test = _app()
+    labels = [button.label for button in test.download_button]
+
+    assert labels == ["Excel şablonunu indir"]
+    assert "1 · Şablonu indirin" in _markdown(test)
+
+
+def test_template_download_points_to_xlsx_file():
+    test = _app()
+    button = test.download_button[0]
+
+    assert button.proto.url.endswith(".xlsx")
+    assert button.proto.id.endswith("download-template")
+
+
+def test_template_download_serves_the_real_template_file(monkeypatch):
+    """İndirilen içerik repodaki şablon dosyasının birebir kendisidir."""
+    import streamlit as st_module
+
+    captured: dict[str, object] = {}
+    original = st_module.download_button
+
+    def spy(label, data=None, **kwargs):
+        if kwargs.get("key") == "download-template":
+            captured["label"] = label
+            captured["data"] = data
+            captured["file_name"] = kwargs.get("file_name")
+            captured["mime"] = kwargs.get("mime")
+        return original(label, data=data, **kwargs)
+
+    monkeypatch.setattr(st_module, "download_button", spy)
+
+    test = _app()
+
+    assert not test.exception, [str(e) for e in test.exception]
+    assert captured["data"] == TEMPLATE.read_bytes()
+    assert str(captured["file_name"]).endswith(".xlsx")
+    assert captured["mime"] == XLSX_MIME
+
+
+def test_missing_template_shows_readable_error(monkeypatch):
+    """Şablon dosyası okunamazsa kullanıcıya anlaşılır mesaj gösterilir."""
+    from pathlib import Path as _Path
+
+    original = _Path.read_bytes
+
+    def failing_read(self):
+        if self.name == "supplier_quote_template.xlsx":
+            raise OSError("disk hatası: C:/gizli/yol")
+        return original(self)
+
+    monkeypatch.setattr(_Path, "read_bytes", failing_read)
+
+    test = _app()
+    text = _markdown(test)
+
+    assert "Şablon indirilemiyor" in text
+    assert "C:/gizli/yol" not in text
+    assert len(test.download_button) == 0
+
+
+def test_uploaded_file_replaces_template_download(tmp_path):
+    """Dosya yüklendikten sonra yalnızca rapor indirmeleri görünür."""
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    labels = [button.label for button in test.download_button]
+
+    assert labels == ["Excel raporunu indir", "PDF raporunu indir"]
+
+
+# --------------------------------------------------------------------------- #
 # Mutlu yol — gerçek şablon
 # --------------------------------------------------------------------------- #
 

@@ -70,6 +70,9 @@ from procurement.validator import Finding, ValidationResult, validate  # noqa: E
 APP_TITLE = "AI Procurement Intelligence"
 PRODUCT_LINE = "Galvanizli kare kutu profil · 40 × 40 × 2 mm · 6 m · TL"
 
+TEMPLATE_PATH = ROOT / "templates" / "supplier_quote_template.xlsx"
+TEMPLATE_FILENAME = "tedarikci-teklif-sablonu.xlsx"
+
 VIEW_DASHBOARD = "Dashboard"
 VIEW_COMPARISON = "Tedarikçi karşılaştırması"
 VIEW_AI = "AI analizi"
@@ -673,6 +676,41 @@ def _analyze(payload: bytes) -> tuple[ParsedWorkbook, ValidationResult, Calculat
         validation = validate(parsed, today=date.today())
         result = calculate(parsed, validation)
     return parsed, validation, result
+
+
+def _template_bytes() -> bytes | None:
+    """Standart Excel şablonunu okur; dosya yoksa ``None`` döndürür.
+
+    Şablon yalnızca indirme anında okunur; oturumda veya diskte kopya
+    tutulmaz. Okuma hatası kullanıcıya teknik ayrıntı göstermeden ele alınır.
+    """
+    try:
+        return TEMPLATE_PATH.read_bytes()
+    except OSError:
+        return None
+
+
+def _render_template_download() -> None:
+    """Başlangıç ekranında standart Excel şablonunu indirilebilir yapar."""
+    payload = _template_bytes()
+    if payload is None:
+        st.markdown(
+            '<div class="ai-status is-warn"><div>'
+            "<strong>Şablon indirilemiyor.</strong> "
+            "Standart teklif şablonu şu anda kullanılamıyor. "
+            "Dosyayı yöneticinizden isteyebilir veya daha önce indirdiğiniz "
+            "şablonu kullanabilirsiniz.</div></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.download_button(
+        "Excel şablonunu indir",
+        data=payload,
+        file_name=TEMPLATE_FILENAME,
+        mime=EXCEL_MIME,
+        key="download-template",
+    )
 
 
 def _kpi_html(cards: tuple[KpiCard, ...]) -> str:
@@ -1324,6 +1362,7 @@ if uploaded is None:
         "</div>",
         unsafe_allow_html=True,
     )
+    _render_template_download()
     st.markdown(
         '<div class="empty-state"><h3>Henüz dosya yüklenmedi</h3>'
         "<p>Karşılaştırma, yüklediğiniz dosyadaki doğrulanmış verilerle üretilir. "

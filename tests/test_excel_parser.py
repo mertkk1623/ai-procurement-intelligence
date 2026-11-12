@@ -226,6 +226,38 @@ def test_unsupported_format_raises(tmp_path):
         parse_workbook(path)
 
 
+def test_unreadable_file_message_hides_server_paths(tmp_path):
+    """Bozuk dosya mesajı yol, geçici dizin ve teknik ayrıntı içermez."""
+    path = tmp_path / "bozuk.xlsx"
+    path.write_bytes(b"bu bir excel dosyasi degil")
+
+    with pytest.raises(ExcelParserError) as excinfo:
+        parse_workbook(path)
+
+    message = str(excinfo.value)
+    assert "Dosya açılamadı" in message
+    assert "yeniden yükleyin" in message
+    assert str(path) not in message
+    assert str(tmp_path) not in message
+    assert ".xlsx (" not in message
+    assert "zip" not in message.lower()
+    # Teknik neden hata ayıklama için korunur, kullanıcıya gösterilmez.
+    assert excinfo.value.__cause__ is not None
+
+
+def test_missing_file_message_hides_server_paths(tmp_path):
+    """Bulunamayan dosya mesajı tam yolu kullanıcıya göstermez."""
+    path = tmp_path / "yok.xlsx"
+
+    with pytest.raises(ExcelParserError) as excinfo:
+        parse_workbook(path)
+
+    message = str(excinfo.value)
+    assert "Dosya bulunamadı" in message
+    assert str(path) not in message
+    assert str(tmp_path) not in message
+
+
 def test_file_too_large_raises(tmp_path, monkeypatch):
     import procurement.excel_parser as parser
 
