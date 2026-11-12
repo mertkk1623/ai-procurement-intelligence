@@ -818,7 +818,8 @@ def test_ai_view_is_reachable_and_asks_for_explicit_action(tmp_path):
     assert "Executive Summary" not in text  # kullanıcı butona basmadan çağrı yok
 
 
-def test_ai_view_has_run_button(tmp_path):
+def test_ai_view_has_run_button(tmp_path, monkeypatch):
+    monkeypatch.setenv(ai_analysis.API_KEY_ENV, "test-anahtar")
     test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
 
     assert len(test.button) == 1
