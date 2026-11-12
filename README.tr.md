@@ -201,6 +201,9 @@ ai-procurement-intelligence/
 ├── pytest.ini                      # Test keşfi, PYTHONPATH'te src, işaretleyiciler
 ├── opencode.json                   # Düzenleyici/ajan yapılandırması (çalışma zamanında kullanılmaz)
 ├── .gitignore                      # .env, secrets.toml, .venv ve önbellekleri dışlar
+├── .github/
+│   └── workflows/
+│       └── tests.yml               # CI: Python 3.11, 3.12 ve 3.13 üzerinde pytest
 ├── docs/
 │   ├── PROJECT_BRIEF.md            # Ürün kapsamı, hesaplama kuralları, AI sınırları
 │   ├── EXCEL_TEMPLATE_SPEC.md      # Şablon yapısı ve doğrulama kataloğu
@@ -258,6 +261,18 @@ Ayrıştırıcı, mesajları kullanıcıya dönük ve dosya sistemi yollarından
 | `tests/test_smoke.py` | Paket içe aktarımı ve sürüm |
 
 Mevcut durum: **471 test**; bunların 331'i `unit`, 137'si `integration` olarak işaretlenmiştir, üç duman testi işaret taşımaz.
+
+### Sürekli entegrasyon
+
+`.github/workflows/tests.yml`, her push ve pull request işleminde tüm paketi çalıştırır:
+
+- Ubuntu runner, Python 3.11, 3.12 ve 3.13 için üç paralel job (`fail-fast: false`; bir sürümün başarısız olması diğerlerini iptal etmez);
+- bağımlılıklar `requirements.txt` üzerinden kurulur, `pip` önbelleği bu dosyaya göre anahtarlanır;
+- tek test komutu `python -m pytest -q`; `pytest.ini` içindeki `pythonpath = src` kullanılır, `PYTHONPATH` ayarı ezilmez;
+- `PYTHONUTF8=1` ve `PYTHONIOENCODING=utf-8` ile Türkçe test adları ve hata iletileri tutarlı okunur;
+- 15 dakikalık job zaman aşımı ve dal başına cancel-in-progress eşzamanlılık kuralı.
+
+API anahtarı gerekmez: AI testleri sahte bir istemci (`_FakeClient`) enjekte eder, paket ağa hiç çıkmaz.
 
 ---
 

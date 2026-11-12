@@ -201,6 +201,9 @@ ai-procurement-intelligence/
 ├── pytest.ini                      # Test discovery, src on PYTHONPATH, markers
 ├── opencode.json                   # Editor/agent configuration (not used at runtime)
 ├── .gitignore                      # Excludes .env, secrets.toml, .venv, caches
+├── .github/
+│   └── workflows/
+│       └── tests.yml               # CI: pytest on Python 3.11, 3.12 and 3.13
 ├── docs/
 │   ├── PROJECT_BRIEF.md            # Product scope, calculation rules, AI limits
 │   ├── EXCEL_TEMPLATE_SPEC.md      # Template structure and validation catalogue
@@ -258,6 +261,18 @@ The parser raises one exception hierarchy whose messages are user-facing and fre
 | `tests/test_smoke.py` | Package import and version |
 
 Current state: **471 tests**, of which 331 are marked `unit` and 137 `integration`; three smoke tests carry no marker.
+
+### Continuous integration
+
+`.github/workflows/tests.yml` runs the full suite on every push and pull request:
+
+- Ubuntu runner, three parallel jobs for Python 3.11, 3.12 and 3.13 (`fail-fast: false`, so one version failing does not cancel the others);
+- dependencies installed from `requirements.txt` with the `pip` cache keyed on that file;
+- `python -m pytest -q` as the only test command, relying on `pythonpath = src` from `pytest.ini` — no `PYTHONPATH` override;
+- `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` so the Turkish test names and assertion messages are read consistently;
+- a 15-minute job timeout and cancel-in-progress concurrency per branch.
+
+No API key is needed: the AI tests inject a fake client (`_FakeClient`), so the suite never reaches the network.
 
 ---
 
