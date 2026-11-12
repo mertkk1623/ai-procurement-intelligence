@@ -64,7 +64,7 @@ All items below are implemented and verified in the current source code.
 | **AI-powered procurement analysis** | Optional, user-triggered interpretation of the calculated results through an OpenAI-compatible endpoint. Five fixed sections. Supplier names are masked before the request; numeric claims in the response are verified against source figures. |
 | **Excel report generation** | `Yönetici Özeti`, `Tedarikçi Karşılaştırma` and `Doğrulama` sheets, plus an `AI Yorumu` sheet when an analysis exists in the session. |
 | **PDF report generation** | A4 ReportLab document with request metadata, an executive summary, a comparison table, a cost evaluation, a delivery and payment table, validation findings and method notes. The AI section is appended only when an analysis exists. |
-| **Product roadmap interface** | A static fourth view presenting V1 (live), V2 (planned) and V3 (future) as a three-stage roadmap. It is presentational only. |
+| **Product roadmap interface** | V1 (live), V2 (planned) and V3 (future) as a three-stage roadmap, rendered as a static fourth view and summarised on the start screen from the same component. It is presentational only. |
 
 ### What the AI layer does not do
 
@@ -111,7 +111,7 @@ Both reports were produced by the application from the same demonstration workbo
 
 ## How It Works
 
-The workflow below matches the current implementation in `app.py`.
+The workflow below matches the current implementation in `app.py`. Before a file is uploaded, the start screen presents a five-step overview (download the template, fill in supplier quotations, upload the workbook, review the analysis, download reports), the template download, a collapsible Excel guide and the product roadmap.
 
 1. **Download the Excel template.**
    On the start screen, `st.download_button` serves `templates/supplier_quote_template.xlsx` as `tedarikci-teklif-sablonu.xlsx`. If the file cannot be read, the app shows a readable warning instead of a button.
@@ -387,7 +387,7 @@ No secrets, tokens or credentials belong in this repository. If the AI key is om
 
 ## Roadmap
 
-The roadmap is also visible inside the application as a static fourth view. V2 and V3 are **not implemented**; they are planning statements.
+The roadmap is rendered from a single component in two places: on the start screen before any file is uploaded, and as a static fourth view after a file is loaded. V2 and V3 are **not implemented**; they are planning statements.
 
 ### V1 — Core Procurement Platform
 

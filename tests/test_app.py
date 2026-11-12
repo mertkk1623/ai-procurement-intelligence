@@ -158,7 +158,8 @@ def test_template_download_is_available_on_start_screen():
     labels = [button.label for button in test.download_button]
 
     assert labels == ["Excel şablonunu indir"]
-    assert "1 · Şablonu indirin" in _markdown(test)
+    assert "Excel şablonunu indir" in _markdown(test)
+    assert "Nasıl Çalışır?" in _markdown(test)
 
 
 def test_template_download_points_to_xlsx_file():

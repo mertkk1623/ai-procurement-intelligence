@@ -468,6 +468,94 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   margin-bottom: 1rem;
 }
 
+/* -------------------------------------------------------------- landing --- */
+.howto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.howto-step {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1rem 1.125rem 1.0625rem;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.howto-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex: 0 0 22px;
+  border-radius: 6px;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info);
+  font-size: 0.6875rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.howto-step h3 {
+  margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--ink);
+  line-height: 1.35;
+}
+.howto-step p {
+  margin: 0; font-size: 0.75rem; color: var(--muted); line-height: 1.5;
+}
+
+.guide {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0 1.25rem;
+  margin: 1.25rem 0;
+}
+.guide > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 1rem 0;
+  font-size: 0.875rem; font-weight: 600; color: var(--ink);
+}
+.guide > summary::-webkit-details-marker { display: none; }
+.guide > summary::after {
+  content: "+"; margin-left: auto;
+  font-size: 1rem; font-weight: 500; color: var(--muted);
+}
+.guide[open] > summary { border-bottom: 1px solid var(--border); }
+.guide[open] > summary::after { content: "\2212"; }
+.guide-hint {
+  margin-left: 0.35rem; font-size: 0.75rem; font-weight: 400; color: var(--muted);
+}
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.125rem 1.5rem;
+  padding: 1.125rem 0 1.25rem;
+}
+.guide-item h4 {
+  margin: 0 0 0.35rem; font-size: 0.8125rem; font-weight: 600; color: var(--ink);
+}
+.guide-item p {
+  margin: 0 0 0.45rem; font-size: 0.75rem; color: var(--ink-soft); line-height: 1.55;
+}
+.guide-item p:last-child { margin-bottom: 0; }
+.guide-item ul { margin: 0; padding-left: 1.1rem; }
+.guide-item li {
+  font-size: 0.75rem; color: var(--ink-soft); line-height: 1.55;
+}
+.guide-item code {
+  font-size: 0.6875rem; background: var(--surface-muted);
+  border: 1px solid var(--border); border-radius: 5px; padding: 0.05rem 0.25rem;
+}
+.guide-item.is-callout {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 10px;
+  padding: 0.875rem 1rem;
+}
+.guide-item.is-callout h4, .guide-item.is-callout p { color: #93370d; }
+.guide-item.is-callout code { background: #ffffff; border-color: var(--warn-border); }
+
 /* ------------------------------------------------------------------ nav --- */
 [data-testid="stButtonGroup"] { margin: 0 0 1.5rem; }
 [data-testid="stButtonGroup"] button {
@@ -740,6 +828,11 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   .roadmap-track { grid-template-columns: 1fr; gap: 0.75rem; }
   .roadmap-stage { padding: 1.125rem 1rem 1rem; }
   .roadmap-head { flex-wrap: wrap; }
+  .howto-grid { grid-template-columns: 1fr; gap: 0.625rem; }
+  .howto-step { padding: 0.875rem 0.9375rem; }
+  .guide { padding: 0 1rem; }
+  .guide-grid { grid-template-columns: 1fr; gap: 1rem; padding: 1rem 0 1.125rem; }
+  .guide > summary { padding: 0.875rem 0; }
 }
 </style>
 """
@@ -797,6 +890,140 @@ def _render_template_download() -> None:
         file_name=TEMPLATE_FILENAME,
         mime=EXCEL_MIME,
         key="download-template",
+    )
+
+
+#: Karşılama ekranındaki adımlar. Sunum amaçlıdır: hiçbir davranış bu
+#: metinlerden türetilmez.
+_HOW_IT_WORKS = (
+    ("Excel şablonunu indir", "Standart teklif şablonunu indirin."),
+    ("Tedarikçi tekliflerini doldur", "RFQ bilgilerini ve her tedarikçi için bir satır girin."),
+    ("Excel'i yükle", "Doldurduğunuz .xlsx dosyasını yükleyin."),
+    ("Teklifleri analiz et", "Doğrulama bulgularını ve maliyet karşılaştırmasını inceleyin."),
+    ("Raporları indir", "Excel veya PDF raporunu indirin."),
+)
+
+
+def _render_how_it_works() -> None:
+    """Beş adımlı akış özeti. Yalnızca sunumdur."""
+    steps: list[str] = []
+    for index, (title, caption) in enumerate(_HOW_IT_WORKS, start=1):
+        steps.append(
+            '<div class="howto-step">'
+            f'<span class="howto-num">{index}</span>'
+            f"<h3>{html.escape(title)}</h3>"
+            f"<p>{html.escape(caption)}</p>"
+            "</div>"
+        )
+    st.markdown(
+        _section_head(
+            "Nasıl Çalışır?",
+            "Teklifler tek bir şablon üzerinden toplanır ve aynı kurallarla "
+            "karşılaştırılır.",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div class="howto-grid">{"".join(steps)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+#: Excel kullanım rehberi. İçerik, şablonun ``Instructions`` sayfası ve
+#: doğrulama kurallarıyla birebir uyumludur; yeni alan tanımlamaz.
+_GUIDE_ITEMS = (
+    (
+        "Şablonu indirin",
+        "<p>Yukarıdaki <strong>Excel şablonunu indir</strong> düğmesi standart "
+        "şablonu <code>tedarikci-teklif-sablonu.xlsx</code> adıyla indirir. "
+        "Yalnızca <code>.xlsx</code> kabul edilir; dosya en fazla 5 MB olabilir.</p>"
+        "<p>Şablon üç sayfa içerir: <code>Instructions</code>, <code>RFQ</code> "
+        "ve <code>Supplier Quotes</code>. Sayfa adlarını ve sütun başlıklarını "
+        "değiştirmeyin.</p>",
+    ),
+    (
+        "RFQ ve ürün bilgileri",
+        "<p><code>RFQ</code> sayfasını bir kez doldurun. Zorunlu alanlar: "
+        "<strong>RFQ Number</strong>, <strong>RFQ Date</strong>, "
+        "<strong>Quantity (pcs)</strong> ve <strong>Delivery Location</strong>.</p>"
+        "<p>Ürün kodu, profil ölçüsü, uzunluk ve para birimi sabittir; "
+        "değiştirilemez. RFQ'da eksik zorunlu alan dosyanın tamamını reddeder.</p>",
+    ),
+    (
+        "Tedarikçi başına bir satır",
+        "<p><code>Supplier Quotes</code> sayfasında her tedarikçiyi "
+        "<strong>ayrı bir satıra</strong> girin. 2. satır başlıktır; veri 3. "
+        "satırdan başlar. Tamamen boş satırlar yok sayılır.</p>"
+        "<p>Zorunlu alanlar: Supplier Name, Supplier Quote Number, Profile "
+        "Specification, Length (m), Quantity (pcs), Weight (kg/m), Unit Price, "
+        "Payment Terms ve Quote Date. Bir satırda eksik zorunlu alan yalnızca o "
+        "satırı devre dışı bırakır.</p>",
+    ),
+    (
+        "Birim fiyat, kg/m, termin ve ödeme",
+        "<p><strong>Unit Price</strong> TL/kg ve <strong>KDV hariç</strong> "
+        "girilir. Şablonda KDV sütunu yoktur; uygulama KDV hesaplamaz.</p>"
+        "<p><strong>Weight (kg/m)</strong> tedarikçinin beyanıdır. 2,27–2,51 "
+        "aralığı dışındaki değerler yalnızca uyarı üretir, karşılaştırmayı "
+        "durdurmaz.</p>"
+        "<p><strong>Delivery Days</strong> gün olarak yazılır. "
+        "<strong>Payment Terms</strong> yalnızca metindir (ör. Peşin, Net 30, "
+        "%50 peşin, %50 teslimatta); vade günü yazılmaz.</p>",
+    ),
+    (
+        "Nakliye ve nakliye kaynağı",
+        "<p><strong>Shipping Cost</strong> TL ve KDV hariçtir. "
+        "<strong>Shipping Cost Source</strong> yalnızca "
+        "<code>Supplier Quote</code> veya <code>Customer Assumption</code> "
+        "değerini alır.</p>"
+        "<p>Nakliye tutarı doluysa kaynak boş bırakılamaz. "
+        "<code>Customer Assumption</code> seçildiğinde varsayımın gerekçesi "
+        "<strong>Notes</strong> alanına yazılmalıdır.</p>",
+    ),
+    (
+        "KDV beyanı ve tarihler",
+        "<p>Dosyanın işleme alınması için "
+        "<code>Instructions</code> sayfasındaki <code>B4</code> hücresinde "
+        "<strong>VAT Declaration</strong> değeri <code>EVET</code> olmalıdır. "
+        "Şablon <code>HAYIR</code> ile gelir; beyan bilinçli olarak "
+        "değiştirilmelidir, aksi hâlde dosya reddedilir.</p>"
+        "<p>Tarih biçimi <code>yyyy-mm-dd</code>'dir. <strong>Quote Date</strong> "
+        "zorunludur; <strong>Quote Valid Until</strong> teklif tarihinden önce "
+        "olamaz.</p>",
+    ),
+)
+
+
+def _render_excel_guide() -> None:
+    """Katlanabilir Excel kullanım rehberi (varsayılan kapalı)."""
+    items: list[str] = []
+    for title, body in _GUIDE_ITEMS:
+        items.append(
+            f'<div class="guide-item"><h4>{html.escape(title)}</h4>{body}</div>'
+        )
+    items.append(
+        '<div class="guide-item is-callout">'
+        "<h4>Nakliye bilinmiyorsa</h4>"
+        "<p>Nakliye tutarı bilinmiyorsa <strong>Shipping Cost</strong> alanını "
+        "boş bırakın; <strong>sıfır yazmayın</strong>. Sıfır, gerçek bir maliyet "
+        "gibi okunur. Boş bırakılan nakliye sıfır sayılmaz; tabloda "
+        "<em>Eksik veri</em> olarak gösterilir ve karşılaştırma durmaz.</p></div>"
+    )
+    items.append(
+        '<div class="guide-item is-callout">'
+        "<h4>Örnek veriler demo amaçlıdır</h4>"
+        "<p><code>Supplier Quotes</code> sayfasındaki 3–5. satırlar yalnızca "
+        "örnekleme içindir. Kendi tekliflerinizle değiştirin; örnek satırları "
+        "gerçek veri olarak kullanmayın.</p></div>"
+    )
+    st.markdown(
+        '<details class="guide">'
+        "<summary>Excel kullanım rehberi"
+        '<span class="guide-hint">Şablonu doldurmadan önce okuyun</span>'
+        "</summary>"
+        f'<div class="guide-grid">{"".join(items)}</div>'
+        "</details>",
+        unsafe_allow_html=True,
     )
 
 
@@ -1535,20 +1762,15 @@ uploaded = st.file_uploader(
 
 if uploaded is None:
     st.markdown(
-        '<div class="info-strip">'
-        "<span>1 · Şablonu indirin ve tedarikçi tekliflerini girin</span>"
-        "<span>2 · Dosyayı buraya yükleyin</span>"
-        "<span>3 · Doğrulama ve maliyet karşılaştırmasını inceleyin</span>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    _render_template_download()
-    st.markdown(
         '<div class="empty-state"><h3>Henüz dosya yüklenmedi</h3>'
         "<p>Karşılaştırma, yüklediğiniz dosyadaki doğrulanmış verilerle üretilir. "
         "Örnek veya varsayılan veri kullanılmaz.</p></div>",
         unsafe_allow_html=True,
     )
+    _render_how_it_works()
+    _render_template_download()
+    _render_excel_guide()
+    _render_roadmap()
     st.stop()
 
 try:

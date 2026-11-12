@@ -64,7 +64,7 @@ Aşağıdaki maddelerin tamamı mevcut kaynak kodda uygulanmış ve doğrulanmı
 | **Yapay zekâ destekli satın alma analizi** | İsteğe bağlı, kullanıcı tetiklemeli yorum. OpenAI uyumlu uç nokta üzerinden çalışır, beş sabit bölüm üretir. Tedarikçi adları istekten önce maskelenir; yanıttaki sayısal ifadeler kaynak verilerle doğrulanır. |
 | **Excel raporu** | `Yönetici Özeti`, `Tedarikçi Karşılaştırma` ve `Doğrulama` sayfaları; oturumda analiz varsa ek olarak `AI Yorumu` sayfası. |
 | **PDF raporu** | Talep bilgileri, yönetici özeti, karşılaştırma tablosu, maliyet değerlendirmesi, teslimat ve ödeme tablosu, doğrulama bulguları ve yöntem notlarını içeren A4 ReportLab belgesi. AI bölümü yalnızca analiz varsa eklenir. |
-| **Ürün yol haritası arayüzü** | V1 (canlı), V2 (planlı) ve V3 (gelecek) aşamalarını üç aşamalı yol haritası olarak sunan statik dördüncü görünüm. Yalnızca sunum amaçlıdır. |
+| **Ürün yol haritası arayüzü** | V1 (canlı), V2 (planlı) ve V3 (gelecek) aşamalarını üç aşamalı yol haritası olarak sunar; statik dördüncü görünüm olarak ve aynı bileşenden başlangıç ekranında özetlenir. Yalnızca sunum amaçlıdır. |
 
 ### Yapay zekâ katmanının yapmadıkları
 
@@ -111,7 +111,7 @@ Her iki rapor da uygulama tarafından aynı gösterim çalışma kitabından, AI
 
 ## Nasıl Çalışır?
 
-Aşağıdaki akış `app.py` içindeki mevcut uygulamayla birebir eşleşir.
+Aşağıdaki akış `app.py` içindeki mevcut uygulamayla birebir eşleşir. Dosya yüklenmeden önce başlangıç ekranı beş adımlı bir özet (şablonu indir, tedarikçi tekliflerini doldur, dosyayı yükle, analizi incele, raporları indir), şablon indirmesini, katlanabilir bir Excel rehberini ve ürün yol haritasını gösterir.
 
 1. **Excel şablonunu indirin.**
    Başlangıç ekranında `st.download_button`, `templates/supplier_quote_template.xlsx` dosyasını `tedarikci-teklif-sablonu.xlsx` adıyla sunar. Dosya okunamazsa buton yerine anlaşılır bir uyarı gösterilir.
@@ -387,7 +387,7 @@ Bu depoya hiçbir gizli anahtar, token veya kimlik bilgisi eklenmemelidir. AI an
 
 ## Yol Haritası
 
-Yol haritası uygulama içinde statik dördüncü görünüm olarak da yer alır. V2 ve V3 **uygulanmamıştır**; planlama ifadeleridir.
+Yol haritası tek bir bileşenden iki yerde çizilir: herhangi bir dosya yüklenmeden başlangıç ekranında ve dosya yüklendikten sonra statik dördüncü görünüm olarak. V2 ve V3 **uygulanmamıştır**; planlama ifadeleridir.
 
 ### V1 — Core Procurement Platform
 
