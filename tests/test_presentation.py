@@ -25,15 +25,18 @@ from procurement.excel_parser import ParsedWorkbook, parse_workbook
 from procurement.presentation import (
     LOWEST_BADGE,
     MISSING_TEXT,
+    build_analysis_summary,
     build_comparison_rows,
     build_cost_figure,
     build_kpis,
     comparison_table_html,
+    dashboard_chart_metric,
     excluded_row_views,
     finding_context,
     format_days,
     format_money,
     format_quantity,
+    format_quantity_value,
     format_rate,
     format_weight,
     group_findings,
@@ -128,6 +131,17 @@ def test_format_rate_uses_four_decimals():
 def test_format_quantity_uses_thousands_separator():
     assert format_quantity(500) == "500"
     assert format_quantity(1_000_000) == "1.000.000"
+
+
+def test_format_quantity_value_accepts_text_numbers():
+    """Validator'ın kabul ettiği virgüllü metin okunur sayıya çevrilir."""
+    assert format_quantity_value("500,0") == "500"
+    assert format_quantity_value(500) == "500"
+    assert format_quantity_value(None) is None
+
+
+def test_format_quantity_value_passes_through_unreadable_text():
+    assert format_quantity_value("belirsiz") == "belirsiz"
 
 
 def test_format_days_renders_integer_without_decimals():
@@ -605,6 +619,173 @@ def test_comparison_rows_empty_when_no_quote_rows(tmp_path):
     assert build_comparison_rows(result, parsed) == ()
     assert comparison_table_html(()) == ""
     assert build_cost_figure(result, "product") is None
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard — analiz özeti
+# --------------------------------------------------------------------------- #
+
+
+def test_dashboard_chart_metric_prefers_total_cost(tmp_path):
+    _parsed, _validation, result = _analyse(tmp_path)
+
+    assert dashboard_chart_metric(result) == "total"
+
+
+def test_dashboard_chart_metric_falls_back_to_product(tmp_path):
+    """Tüm satırlarda toplam eksikse ürün bedeli grafiği kullanılır."""
+
+    def mutate(workbook) -> None:
+        sheet = workbook["Supplier Quotes"]
+        for row in (3, 4, 5):
+            sheet[f"H{row}"] = None
+
+    _parsed, _validation, result = _analyse(tmp_path, mutate)
+
+    assert dashboard_chart_metric(result) == "product"
+
+
+def test_dashboard_chart_metric_is_none_without_rows(tmp_path):
+    _parsed, _validation, result = _analyse(
+        tmp_path, _set("Instructions", "B4", "HAYIR")
+    )
+
+    assert dashboard_chart_metric(result) is None
+
+
+def test_summary_counts_come_from_engine(tmp_path):
+    parsed, validation, result = _analyse(tmp_path)
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name="teklif.xlsx"
+    )
+    groups = {group.title: group for group in summary.groups}
+    values = {
+        item.label: item.value
+        for group in summary.groups
+        for item in group.items
+    }
+
+    assert groups["Doğrulama"].items[0].value == "3"  # tedarikçi satırı
+    assert values["Hesaplanan teklif"] == str(len(result.rows))
+    assert values["Hatalar"] == str(len(validation.errors))
+    assert values["Uyarılar"] == str(len(validation.warnings))
+    assert values["Bilgi talepleri"] == str(len(validation.infos))
+    assert values["Dosya"] == "teklif.xlsx"
+
+
+def test_summary_status_for_clean_template(tmp_path):
+    parsed, validation, result = _analyse(tmp_path)
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name="teklif.xlsx"
+    )
+
+    assert summary.status_label == "Uyarılarla tamamlandı"
+    assert summary.status_tone == "warn"
+
+
+def test_summary_status_for_missing_shipping(tmp_path):
+    parsed, validation, result = _analyse(
+        tmp_path, _set("Supplier Quotes", "H3", None)
+    )
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name="teklif.xlsx"
+    )
+
+    assert summary.status_label == "Eksik veri var"
+    assert summary.status_tone == "warn"
+    assert "1 satır" in summary.status_detail
+
+
+def test_summary_status_for_excluded_row(tmp_path):
+    parsed, validation, result = _analyse(
+        tmp_path, _set("Supplier Quotes", "G3", 0)
+    )
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name="teklif.xlsx"
+    )
+    values = {
+        item.label: item.value
+        for group in summary.groups
+        for item in group.items
+    }
+
+    assert summary.status_label == "Kısmi karşılaştırma"
+    assert summary.status_tone == "error"
+    assert values["Hesaplanan teklif"] == "2"
+
+
+def test_summary_status_for_rejected_file(tmp_path):
+    parsed, validation, result = _analyse(
+        tmp_path, _set("Instructions", "B4", "HAYIR")
+    )
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name="teklif.xlsx"
+    )
+
+    assert summary.status_label == "Dosya reddedildi"
+    assert summary.status_tone == "error"
+
+
+def test_summary_status_without_quote_rows(tmp_path):
+    def mutate(workbook) -> None:
+        sheet = workbook["Supplier Quotes"]
+        for row in range(3, 6):
+            for column in "ABCDEFGHIJKLMN":
+                sheet[f"{column}{row}"] = None
+
+    parsed, validation, result = _analyse(tmp_path, mutate)
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name="teklif.xlsx"
+    )
+
+    assert summary.status_label == "Teklif satırı yok"
+    assert summary.status_tone == "warn"
+
+
+def test_summary_file_group_reflects_rfq(tmp_path):
+    parsed, validation, result = _analyse(tmp_path)
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name="teklif.xlsx"
+    )
+    file_group = summary.groups[0]
+    values = {item.label: item.value for item in file_group.items}
+
+    assert file_group.title == "Teklif dosyası"
+    assert values["Talep"] == "RFQ-2026-0042"
+    assert values["Ürün"] == "40x40x2"
+    assert values["Miktar"] == "500 adet"
+
+
+def test_summary_handles_text_quantity(tmp_path):
+    """Validator'ın kabul ettiği metin miktar özette okunur biçimde görünür."""
+    parsed, validation, result = _analyse(
+        tmp_path, _set("RFQ", "B9", "500,0")
+    )
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name="teklif.xlsx"
+    )
+    values = {
+        item.label: item.value
+        for group in summary.groups
+        for item in group.items
+    }
+
+    assert values["Miktar"] == "500 adet"
+
+
+def test_summary_is_stateless(tmp_path):
+    """Aynı girdi aynı özeti üretir; geçmiş biriktirilmez."""
+    parsed, validation, result = _analyse(tmp_path)
+
+    first = build_analysis_summary(
+        parsed, validation, result, file_name="a.xlsx"
+    )
+    second = build_analysis_summary(
+        parsed, validation, result, file_name="a.xlsx"
+    )
+
+    assert first == second
+    assert first.file_name == "a.xlsx"
 
 
 # --------------------------------------------------------------------------- #

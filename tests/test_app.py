@@ -13,6 +13,7 @@ senaryosu için gereken hücre değiştirilir.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -87,6 +88,23 @@ def _set(sheet: str, cell: str, value):
     return mutate
 
 
+DASHBOARD = "Dashboard"
+COMPARISON = "Tedarikçi karşılaştırması"
+
+
+def _view(test: AppTest, label: str) -> AppTest:
+    """Görünümü değiştirir; dashboard varsayılan görünümdür."""
+    test.segmented_control[0].set_value(label)
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+    return test
+
+
+def _comparison(test: AppTest) -> AppTest:
+    """Karşılaştırma görünümüne geçer."""
+    return _view(test, COMPARISON)
+
+
 # --------------------------------------------------------------------------- #
 # Başlangıç durumu
 # --------------------------------------------------------------------------- #
@@ -128,7 +146,7 @@ def test_upload_renders_kpi_cards(tmp_path):
 
 
 def test_upload_renders_comparison_table(tmp_path):
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
     table = _table_html(test)
 
     assert table
@@ -137,7 +155,7 @@ def test_upload_renders_comparison_table(tmp_path):
 
 
 def test_table_has_every_required_column(tmp_path):
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
     table = _table_html(test)
 
     for header in (
@@ -156,7 +174,7 @@ def test_table_has_every_required_column(tmp_path):
 
 
 def test_table_shows_calculated_values(tmp_path):
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
     table = _table_html(test)
 
     # 500 adet × 6 m × 2,39 kg/m = 7170 kg; × 28,50 = 204.345,00
@@ -168,13 +186,13 @@ def test_table_shows_calculated_values(tmp_path):
 
 
 def test_table_shows_payment_terms_verbatim(tmp_path):
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
 
     assert "%50 peşin, %50 teslimatta" in _table_html(test)
 
 
 def test_lowest_values_are_marked(tmp_path):
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
     table = _table_html(test)
 
     assert "En düşük" in table
@@ -182,7 +200,7 @@ def test_lowest_values_are_marked(tmp_path):
 
 
 def test_upload_renders_both_charts(tmp_path):
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
     charts = test.get("plotly_chart")
 
     assert len(charts) == 2
@@ -190,7 +208,7 @@ def test_upload_renders_both_charts(tmp_path):
 
 def test_template_warnings_are_shown_as_warnings(tmp_path):
     """Şablonun kendi iki uyarısı ayrı bölümde gösterilir; hata paneli yok."""
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
     text = _markdown(test)
 
     assert "W-PAY-01" in text
@@ -200,7 +218,7 @@ def test_template_warnings_are_shown_as_warnings(tmp_path):
 
 
 def test_warning_mentions_supplier_and_cell(tmp_path):
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
     text = _markdown(test)
 
     assert "Supplier Quotes!F5" in text
@@ -213,8 +231,10 @@ def test_warning_mentions_supplier_and_cell(tmp_path):
 
 
 def test_missing_shipping_is_shown_as_missing_data(tmp_path):
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    test = _comparison(
+        _upload(
+            _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+        )
     )
     table = _table_html(test)
     row_html = table.split("Bursa Metal A.Ş.")[1].split("</tr>")[0]
@@ -225,8 +245,10 @@ def test_missing_shipping_is_shown_as_missing_data(tmp_path):
 
 
 def test_missing_shipping_keeps_product_cost(tmp_path):
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    test = _comparison(
+        _upload(
+            _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+        )
     )
     table = _table_html(test)
 
@@ -234,16 +256,20 @@ def test_missing_shipping_keeps_product_cost(tmp_path):
 
 
 def test_missing_shipping_row_is_tagged(tmp_path):
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    test = _comparison(
+        _upload(
+            _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+        )
     )
 
     assert "Nakliye bilgisi eksik" in _table_html(test)
 
 
 def test_missing_shipping_is_reported_as_info(tmp_path):
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    test = _comparison(
+        _upload(
+            _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+        )
     )
     text = _markdown(test)
 
@@ -253,8 +279,10 @@ def test_missing_shipping_is_reported_as_info(tmp_path):
 
 def test_missing_shipping_excludes_row_from_total_chart(tmp_path):
     """Toplam maliyeti hesaplanamayan satır toplam grafiğine girmez."""
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    test = _comparison(
+        _upload(
+            _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+        )
     )
     text = _markdown(test)
 
@@ -262,8 +290,10 @@ def test_missing_shipping_excludes_row_from_total_chart(tmp_path):
 
 
 def test_missing_shipping_moves_lowest_total(tmp_path):
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    test = _comparison(
+        _upload(
+            _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+        )
     )
     text = _markdown(test)
 
@@ -272,8 +302,8 @@ def test_missing_shipping_moves_lowest_total(tmp_path):
 
 
 def test_explicit_zero_shipping_is_complete(tmp_path):
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", 0))
+    test = _comparison(
+        _upload(_app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", 0)))
     )
     text = _markdown(test)
 
@@ -333,8 +363,8 @@ def test_corrupt_file_shows_readable_error(tmp_path):
 
 
 def test_bad_row_is_excluded_and_others_computed(tmp_path):
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "G3", 0))
+    test = _comparison(
+        _upload(_app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "G3", 0)))
     )
     text = _markdown(test)
     table = _table_html(test)
@@ -385,6 +415,182 @@ def test_all_rows_empty_shows_clear_empty_state(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Dashboard
+# --------------------------------------------------------------------------- #
+
+
+def test_dashboard_is_default_view(tmp_path):
+    """Dosya yüklenince varsayılan görünüm Dashboard'dır."""
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+
+    assert test.segmented_control[0].value == DASHBOARD
+    assert _table_html(test) == ""  # karşılaştırma tablosu dashboard'da yok
+
+
+def test_dashboard_offers_navigation_between_views(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    options = test.segmented_control[0].options
+
+    assert list(options) == [DASHBOARD, COMPARISON]
+
+
+def test_dashboard_shows_four_kpi_cards(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    assert "Genel özet" in text
+    for label in (
+        "Tedarikçi sayısı",
+        "Hesaplanabilen teklif",
+        "En düşük ürün bedeli",
+        "En düşük toplam tedarik maliyeti",
+    ):
+        assert label in text
+
+
+def test_dashboard_kpi_values_come_from_calculator(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    assert "204.345,00 TL" in text
+    assert "211.845,00 TL" in text
+    assert "Bursa Metal A.Ş." in text
+
+
+def test_dashboard_renders_one_cost_chart(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    charts = test.get("plotly_chart")
+
+    assert len(charts) == 1
+    assert "Tedarikçi bazında maliyet" in _markdown(test)
+
+
+def test_dashboard_chart_is_total_cost_when_available(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    spec = json.loads(test.get("plotly_chart")[0].proto.spec)
+
+    assert spec["data"][0]["x"] == [211845.0, 213793.0, 225046.0]
+    assert "Toplam tedarik maliyeti (TL)" in _markdown(test)
+
+
+def test_dashboard_chart_falls_back_to_product_cost(tmp_path):
+    """Hiçbir satırda toplam hesaplanamıyorsa ürün bedeli grafiği çizilir."""
+
+    def mutate(workbook) -> None:
+        sheet = workbook["Supplier Quotes"]
+        for row in (3, 4, 5):
+            sheet[f"H{row}"] = None
+
+    test = _upload(_app(), _workbook_bytes(tmp_path, mutate))
+    spec = json.loads(test.get("plotly_chart")[0].proto.spec)
+
+    assert len(spec["data"][0]["x"]) == 3
+    assert "Ürün bedeli (TL)" in _markdown(test)
+
+
+def test_dashboard_shows_analysis_summary(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    assert "Analiz özeti" in text
+    assert "Son yüklenen teklif dosyası" in text
+    assert "teklif.xlsx" in text
+
+
+def test_dashboard_summary_reports_file_and_validation_counts(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    assert "RFQ-2026-0042" in text
+    assert "40x40x2" in text
+    assert "500 adet" in text
+    assert "Tedarikçi satırı" in text
+    assert "Bilgi talepleri" in text
+
+
+def test_dashboard_summary_status_for_clean_template(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    # Şablonun iki uyarısı vardır; durum "uyarılarla tamamlandı" olur.
+    assert "Uyarılarla tamamlandı" in text
+    assert "status-warn" in text
+
+
+def test_dashboard_chart_note_reports_omitted_rows(tmp_path):
+    test = _upload(
+        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    )
+    text = _markdown(test)
+
+    assert "1 satır eksik nakliye bilgisi nedeniyle grafiğe alınmadı" in text
+
+
+def test_dashboard_summary_flags_missing_shipping(tmp_path):
+    test = _upload(
+        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    )
+    text = _markdown(test)
+
+    assert "Eksik veri var" in text
+    assert "Eksik nakliye" in text
+
+
+def test_dashboard_summary_flags_partial_comparison(tmp_path):
+    test = _upload(
+        _app(), _workbook_bytes(tmp_path, _set("Supplier Quotes", "G3", 0))
+    )
+    text = _markdown(test)
+
+    assert "Kısmi karşılaştırma" in text
+    assert "status-error" in text
+
+
+def test_dashboard_empty_file_shows_no_chart(tmp_path):
+    def mutate(workbook) -> None:
+        sheet = workbook["Supplier Quotes"]
+        for row in range(3, 6):
+            for column in "ABCDEFGHIJKLMN":
+                sheet[f"{column}{row}"] = None
+
+    test = _upload(_app(), _workbook_bytes(tmp_path, mutate))
+    text = _markdown(test)
+
+    assert "Teklif satırı bulunamadı" in text
+    assert len(test.get("plotly_chart")) == 0
+    assert "Teklif satırı yok" in text
+
+
+def test_rejected_file_shows_no_dashboard(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path, vat="HAYIR"))
+    text = _markdown(test)
+
+    assert "Dosya reddedildi" in text
+    assert "Genel özet" not in text
+    assert "Analiz özeti" not in text
+    assert len(test.segmented_control) == 0
+
+
+def test_dashboard_does_not_repeat_comparison_table(tmp_path):
+    """Dashboard'da tablo ve doğrulama bulgu panelleri gösterilmez."""
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    assert _table_html(test) == ""
+    assert "<h3>Uyarılar</h3>" not in text
+    assert "<h3>Bilgi talepleri</h3>" not in text
+
+
+def test_switching_back_to_dashboard_keeps_kpis(tmp_path):
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
+    assert _table_html(test)
+
+    test = _view(test, DASHBOARD)
+    assert _table_html(test) == ""
+    assert "Genel özet" in _markdown(test)
+
+
+# --------------------------------------------------------------------------- #
 # Arayüz kuralları
 # --------------------------------------------------------------------------- #
 
@@ -399,7 +605,7 @@ def test_app_does_not_offer_ranking_or_winner(tmp_path):
 
 
 def test_app_states_no_vat_and_no_automatic_winner(tmp_path):
-    test = _upload(_app(), _workbook_bytes(tmp_path))
+    test = _comparison(_upload(_app(), _workbook_bytes(tmp_path)))
     text = _markdown(test)
 
     assert "KDV hesaplanmaz" in text
@@ -455,11 +661,22 @@ def test_upload_does_not_write_files(tmp_path):
 
 def test_text_quantity_in_rfq_does_not_break_layout(tmp_path):
     """Validator'ın kabul ettiği ``500,0`` gibi metin miktar arayüzü düşürmez."""
-    test = _upload(
-        _app(), _workbook_bytes(tmp_path, _set("RFQ", "B9", "500,0"))
+    test = _comparison(
+        _upload(_app(), _workbook_bytes(tmp_path, _set("RFQ", "B9", "500,0")))
     )
     text = _markdown(test)
 
     assert "500" in text
     assert _table_html(test)
     assert len(test.get("plotly_chart")) == 2
+
+
+def test_text_quantity_in_rfq_shows_in_dashboard_summary(tmp_path):
+    """Dashboard özeti de virgüllü metin miktarı okunur biçimde gösterir."""
+    test = _upload(
+        _app(), _workbook_bytes(tmp_path, _set("RFQ", "B9", "500,0"))
+    )
+    text = _markdown(test)
+
+    assert "500 adet" in text
+    assert "summary-value" in text

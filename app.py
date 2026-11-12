@@ -22,7 +22,6 @@ import html
 import sys
 import tempfile
 from datetime import date
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import streamlit as st
@@ -39,16 +38,19 @@ from procurement.excel_parser import (  # noqa: E402
 )
 from procurement.presentation import (  # noqa: E402
     MISSING_TEXT,
+    AnalysisSummary,
     KpiCard,
+    build_analysis_summary,
     build_comparison_rows,
     build_cost_figure,
     build_kpis,
     comparison_table_html,
+    dashboard_chart_metric,
     excluded_row_views,
     figure_title,
     finding_context,
     format_days,
-    format_quantity,
+    format_quantity_value,
     group_findings,
     rejection_hints,
 )
@@ -56,6 +58,10 @@ from procurement.validator import Finding, ValidationResult, validate  # noqa: E
 
 APP_TITLE = "AI Procurement Intelligence"
 PRODUCT_LINE = "Galvanizli kare kutu profil · 40 × 40 × 2 mm · 6 m · TL"
+
+VIEW_DASHBOARD = "Dashboard"
+VIEW_COMPARISON = "Tedarikçi karşılaştırması"
+VIEW_OPTIONS = (VIEW_DASHBOARD, VIEW_COMPARISON)
 
 # --------------------------------------------------------------------------- #
 # Stil
@@ -324,7 +330,8 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
 
 /* --------------------------------------------------------------- charts --- */
 .st-key-chart-product,
-.st-key-chart-total {
+.st-key-chart-total,
+.st-key-chart-dash {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -333,7 +340,8 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   margin-bottom: 1rem;
 }
 .st-key-chart-product [data-testid="stPlotlyChart"],
-.st-key-chart-total [data-testid="stPlotlyChart"] { margin: 0; }
+.st-key-chart-total [data-testid="stPlotlyChart"],
+.st-key-chart-dash [data-testid="stPlotlyChart"] { margin: 0; }
 .chart-head {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 0.75rem; margin-bottom: 0.25rem;
@@ -444,6 +452,87 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   margin-bottom: 1rem;
 }
 
+/* ------------------------------------------------------------------ nav --- */
+[data-testid="stButtonGroup"] { margin: 0 0 1.5rem; }
+[data-testid="stButtonGroup"] button {
+  border-radius: 9px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------- dashboard --- */
+.summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.125rem 1.25rem 1.25rem;
+}
+.summary-head {
+  display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #f0f1f4;
+}
+.summary-file { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.summary-file-label {
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.summary-file-name {
+  font-size: 0.9375rem; font-weight: 600; color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.summary-detail {
+  margin: 0.75rem 0 0; font-size: 0.8125rem; color: var(--ink-soft);
+  line-height: 1.5;
+}
+.status {
+  display: inline-flex; align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.6875rem; font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.status-ok {
+  background: var(--lowest-bg); border-color: var(--lowest-border);
+  color: #054f31;
+}
+.status-warn {
+  background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn);
+}
+.status-error {
+  background: var(--danger-bg); border-color: var(--danger-border);
+  color: var(--danger);
+}
+.summary-group { margin-top: 1.125rem; }
+.summary-group h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem 1.25rem;
+}
+.summary-item {
+  display: flex; flex-direction: column; gap: 0.1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 0;
+}
+.summary-label { font-size: 0.6875rem; color: var(--muted); font-weight: 500; }
+.summary-value {
+  font-size: 0.875rem; font-weight: 600; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.summary-note { font-size: 0.6875rem; color: var(--muted); line-height: 1.4; }
+
 /* ------------------------------------------------------------ responsive --- */
 @media (max-width: 720px) {
   [data-testid="stAppViewContainer"] > .main .block-container,
@@ -456,6 +545,8 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   .meta-strip { gap: 0.5rem 1.25rem; padding: 0.75rem 0.875rem; }
   .finding { padding: 0.6875rem 0.875rem; gap: 0.5rem; }
   .panel-head { padding: 0.75rem 0.875rem; }
+  .summary-card { padding: 1rem; }
+  .summary-grid { grid-template-columns: 1fr; }
 }
 </style>
 """
@@ -503,23 +594,12 @@ def _section_head(title: str, subtitle: str = "") -> str:
 
 
 def _rfq_quantity_text(value: object) -> str | None:
-    """RFQ miktarını gösterim metnine çevirir; okunamayan değeri olduğu gibi döndürür.
+    """RFQ miktarını gösterim metnine çevirir.
 
-    Validator ``5,00`` gibi virgüllü metni de geçerli sayabildiği için burada
-    ``int()`` çağrısı yapılmaz — arayüz doğrulamanın kabul ettiği bir dosyada
-    çökmemelidir.
+    Dönüşüm :func:`procurement.presentation.format_quantity_value` içindedir;
+    böylece arayüz ile dashboard özeti aynı kuralı kullanır.
     """
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return format_quantity(int(value))
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        return format_quantity(int(Decimal(text.replace(",", "."))))
-    except (InvalidOperation, ValueError):
-        return text
+    return format_quantity_value(value)
 
 
 def _meta_strip(parsed: ParsedWorkbook) -> str:
@@ -618,7 +698,7 @@ def _rejection_panel(validation: ValidationResult) -> str:
     )
 
 
-def _chart_block(result: CalculationResult, metric: str) -> None:
+def _chart_block(result: CalculationResult, metric: str, *, key: str) -> None:
     """Başlık, açıklama ve grafiği tek kart içinde çizer."""
     figure = build_cost_figure(result, metric)
     if figure is None:
@@ -631,7 +711,7 @@ def _chart_block(result: CalculationResult, metric: str) -> None:
         if omitted
         else "Tüm hesaplanan satırlar dahil"
     )
-    with st.container(key=f"chart-{metric}"):
+    with st.container(key=f"chart-{key}"):
         st.markdown(
             f'<div class="chart-head"><h3>{figure_title(metric)}</h3>'
             f"<span>{note}</span></div>"
@@ -642,8 +722,220 @@ def _chart_block(result: CalculationResult, metric: str) -> None:
             unsafe_allow_html=True,
         )
         st.plotly_chart(
-            figure, config={"displayModeBar": False}, key=f"plot-{metric}"
+            figure, config={"displayModeBar": False}, key=f"plot-{key}"
         )
+
+
+def _summary_card(summary: AnalysisSummary) -> str:
+    """Analiz özeti kartını üretir.
+
+    Dosyadan gelen tüm metinler kaçışlanır; kart HTML olarak çizilir.
+    """
+    groups: list[str] = []
+    for group in summary.groups:
+        items: list[str] = []
+        for item in group.items:
+            note = (
+                f'<span class="summary-note">{html.escape(item.note)}</span>'
+                if item.note
+                else ""
+            )
+            items.append(
+                '<div class="summary-item">'
+                f'<span class="summary-label">{html.escape(item.label)}</span>'
+                f'<span class="summary-value">{html.escape(item.value)}</span>'
+                f"{note}</div>"
+            )
+        groups.append(
+            '<div class="summary-group">'
+            f"<h4>{html.escape(group.title)}</h4>"
+            f'<div class="summary-grid">{"".join(items)}</div>'
+            "</div>"
+        )
+
+    return (
+        '<div class="summary-card">'
+        '<div class="summary-head">'
+        '<div class="summary-file">'
+        '<span class="summary-file-label">Son yüklenen teklif dosyası</span>'
+        f'<span class="summary-file-name">{html.escape(summary.file_name)}</span>'
+        "</div>"
+        f'<span class="status status-{summary.status_tone}">'
+        f"{html.escape(summary.status_label)}</span>"
+        "</div>"
+        f'<p class="summary-detail">{html.escape(summary.status_detail)}</p>'
+        f'{"".join(groups)}'
+        "</div>"
+    )
+
+
+def _empty_rows_state(parsed: ParsedWorkbook) -> None:
+    """Hesaplanabilir satır yokken gösterilecek açıklama."""
+    if not parsed.suppliers:
+        st.markdown(
+            '<div class="empty-state"><h3>Teklif satırı bulunamadı</h3>'
+            "<p>Dosyanın <em>Supplier Quotes</em> sayfasında doldurulmuş satır yok. "
+            "En az bir tedarikçi teklifi girilmelidir.</p></div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="empty-state"><h3>Karşılaştırılabilir teklif yok</h3>'
+            "<p>Satırlar doğrulama hataları nedeniyle hesaplamaya alınmadı. "
+            "Aşağıdaki bulguları inceleyip dosyayı düzeltin.</p></div>",
+            unsafe_allow_html=True,
+        )
+
+
+def _render_dashboard(
+    parsed: ParsedWorkbook,
+    validation: ValidationResult,
+    result: CalculationResult,
+    file_name: str,
+) -> None:
+    """Özet görünüm: KPI kartları, tek maliyet grafiği ve analiz özeti."""
+    st.markdown(_section_head("Genel özet"), unsafe_allow_html=True)
+    st.markdown(_kpi_html(build_kpis(parsed, result)), unsafe_allow_html=True)
+
+    if not result.rows:
+        st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+        _empty_rows_state(parsed)
+    else:
+        metric = dashboard_chart_metric(result)
+        if metric is not None:
+            st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+            st.markdown(
+                _section_head(
+                    "Tedarikçi bazında maliyet",
+                    "Çubuk sırası dosyadaki sıradır; en düşük değer yeşil "
+                    "vurgulanır. Toplam maliyeti eksik satırlar toplam "
+                    "grafiğine alınmaz.",
+                ),
+                unsafe_allow_html=True,
+            )
+            _chart_block(result, metric, key="dash")
+
+    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+    st.markdown(
+        _section_head(
+            "Analiz özeti",
+            "Yalnızca bu oturumda yüklenen dosyaya aittir; geçmiş saklanmaz.",
+        ),
+        unsafe_allow_html=True,
+    )
+    summary = build_analysis_summary(
+        parsed, validation, result, file_name=file_name
+    )
+    st.markdown(_summary_card(summary), unsafe_allow_html=True)
+
+    st.markdown(
+        '<p class="table-note">Tedarikçi bazında ayrıntılı tablo, grafikler ve '
+        "doğrulama bulguları için üstteki <strong>Tedarikçi karşılaştırması</strong> "
+        "görünümüne geçin.</p>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_comparison(
+    parsed: ParsedWorkbook,
+    validation: ValidationResult,
+    result: CalculationResult,
+) -> None:
+    """Karşılaştırma görünümü: tablo, iki grafik ve doğrulama bulguları."""
+    findings = group_findings(validation)
+
+    meta = _meta_strip(parsed)
+    if meta:
+        st.markdown(meta, unsafe_allow_html=True)
+
+    st.markdown(_section_head("Genel özet"), unsafe_allow_html=True)
+    st.markdown(_kpi_html(build_kpis(parsed, result)), unsafe_allow_html=True)
+
+    if not result.rows:
+        st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+        _empty_rows_state(parsed)
+
+    if result.rows:
+        st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+        st.markdown(
+            _section_head(
+                "Tedarikçi karşılaştırması",
+                "Satırlar dosyadaki sırada gösterilir. En düşük ürün bedeli ve en "
+                "düşük toplam tedarik maliyeti ayrı işaretlenir.",
+            ),
+            unsafe_allow_html=True,
+        )
+        comparison_rows = build_comparison_rows(result, parsed)
+        st.markdown(comparison_table_html(comparison_rows), unsafe_allow_html=True)
+        st.markdown(
+            '<p class="table-note">Ödeme koşulları maliyet hesabına dahil edilmez; '
+            "yalnızca karşılaştırma bilgisidir. Nakliyesi eksik satırlarda toplam "
+            "maliyet gösterilmez ve sıfır kabul edilmez. Kazanan otomatik "
+            "belirlenmez; seçim kullanıcıya aittir.</p>",
+            unsafe_allow_html=True,
+        )
+
+    if result.rows:
+        st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+        st.markdown(
+            _section_head(
+                "Maliyet karşılaştırması",
+                "Ürün bedeli ve toplam tedarik maliyeti ayrı grafiklerde gösterilir.",
+            ),
+            unsafe_allow_html=True,
+        )
+        _chart_block(result, "product", key="product")
+        _chart_block(result, "total", key="total")
+
+    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+    st.markdown(
+        _section_head(
+            "Doğrulama sonuçları",
+            "Hatalar satırı karşılaştırmadan çıkarır; uyarılar hesaplamayı "
+            "durdurmaz ve karar verilmesini engellemez.",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    if not findings.has_any and not result.excluded:
+        if parsed.suppliers:
+            notice = (
+                "Dosya doğrulamadan hatasız geçti; hesaplamalar doğrulanmış "
+                "verilerle üretildi."
+            )
+        else:
+            notice = (
+                "Doğrulanacak teklif satırı yok. Dosyaya tedarikçi teklifleri "
+                "girildikten sonra tekrar yükleyin."
+            )
+        st.markdown(
+            '<div class="panel"><div class="panel-head">'
+            "<h3>Bulgu yok</h3>"
+            '<span class="count">0</span></div>'
+            '<div class="panel-body"><div class="finding"><div class="finding-body">'
+            f"<p>{notice}</p></div></div></div></div>",
+            unsafe_allow_html=True,
+        )
+
+    if findings.errors:
+        st.markdown(
+            _findings_panel("Hatalar", findings.errors, "E"),
+            unsafe_allow_html=True,
+        )
+    if findings.warnings:
+        st.markdown(
+            _findings_panel("Uyarılar", findings.warnings, "W"),
+            unsafe_allow_html=True,
+        )
+    if findings.infos:
+        st.markdown(
+            _findings_panel("Bilgi talepleri", findings.infos, "I"),
+            unsafe_allow_html=True,
+        )
+
+    excluded = excluded_row_views(result)
+    if excluded:
+        st.markdown(_excluded_panel(excluded), unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -744,114 +1036,21 @@ if validation.file_rejected:
         )
     st.stop()
 
-# --- Talep özeti ---------------------------------------------------------- #
-meta = _meta_strip(parsed)
-if meta:
-    st.markdown(meta, unsafe_allow_html=True)
-
-# --- Özet kartları -------------------------------------------------------- #
-st.markdown(_section_head("Genel özet"), unsafe_allow_html=True)
-st.markdown(_kpi_html(build_kpis(parsed, result)), unsafe_allow_html=True)
-
-if not result.rows:
-    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
-    if not parsed.suppliers:
-        st.markdown(
-            '<div class="empty-state"><h3>Teklif satırı bulunamadı</h3>'
-            "<p>Dosyanın <em>Supplier Quotes</em> sayfasında doldurulmuş satır yok. "
-            "En az bir tedarikçi teklifi girilmelidir.</p></div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<div class="empty-state"><h3>Karşılaştırılabilir teklif yok</h3>'
-            "<p>Satırlar doğrulama hataları nedeniyle hesaplamaya alınmadı. "
-            "Aşağıdaki bulguları inceleyip dosyayı düzeltin.</p></div>",
-            unsafe_allow_html=True,
-        )
-
-# --- Karşılaştırma tablosu ------------------------------------------------ #
-if result.rows:
-    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
-    st.markdown(
-        _section_head(
-            "Tedarikçi karşılaştırması",
-            "Satırlar dosyadaki sırada gösterilir. En düşük ürün bedeli ve en "
-            "düşük toplam tedarik maliyeti ayrı işaretlenir.",
-        ),
-        unsafe_allow_html=True,
-    )
-    comparison_rows = build_comparison_rows(result, parsed)
-    st.markdown(comparison_table_html(comparison_rows), unsafe_allow_html=True)
-    st.markdown(
-        '<p class="table-note">Ödeme koşulları maliyet hesabına dahil edilmez; '
-        "yalnızca karşılaştırma bilgisidir. Nakliyesi eksik satırlarda toplam "
-        "maliyet gösterilmez ve sıfır kabul edilmez. Kazanan otomatik "
-        "belirlenmez; seçim kullanıcıya aittir.</p>",
-        unsafe_allow_html=True,
-    )
-
-# --- Grafikler ------------------------------------------------------------ #
-if result.rows:
-    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
-    st.markdown(
-        _section_head(
-            "Maliyet karşılaştırması",
-            "Ürün bedeli ve toplam tedarik maliyeti ayrı grafiklerde gösterilir.",
-        ),
-        unsafe_allow_html=True,
-    )
-    _chart_block(result, "product")
-    _chart_block(result, "total")
-
-# --- Doğrulama bulguları -------------------------------------------------- #
-st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
-st.markdown(
-    _section_head(
-        "Doğrulama sonuçları",
-        "Hatalar satırı karşılaştırmadan çıkarır; uyarılar hesaplamayı "
-        "durdurmaz ve karar verilmesini engellemez.",
-    ),
-    unsafe_allow_html=True,
+# --- Görünüm seçimi ------------------------------------------------------- #
+view = st.segmented_control(
+    "Görünüm",
+    options=VIEW_OPTIONS,
+    default=VIEW_DASHBOARD,
+    key="view",
+    label_visibility="collapsed",
 )
+if view is None:
+    view = VIEW_DASHBOARD
 
-if not findings.has_any and not result.excluded:
-    if parsed.suppliers:
-        notice = (
-            "Dosya doğrulamadan hatasız geçti; hesaplamalar doğrulanmış "
-            "verilerle üretildi."
-        )
-    else:
-        notice = (
-            "Doğrulanacak teklif satırı yok. Dosyaya tedarikçi teklifleri "
-            "girildikten sonra tekrar yükleyin."
-        )
-    st.markdown(
-        '<div class="panel"><div class="panel-head">'
-        "<h3>Bulgu yok</h3>"
-        '<span class="count">0</span></div>'
-        '<div class="panel-body"><div class="finding"><div class="finding-body">'
-        f"<p>{notice}</p></div></div></div></div>",
-        unsafe_allow_html=True,
-    )
-
-if findings.errors:
-    st.markdown(
-        _findings_panel("Hatalar", findings.errors, "E"), unsafe_allow_html=True
-    )
-if findings.warnings:
-    st.markdown(
-        _findings_panel("Uyarılar", findings.warnings, "W"), unsafe_allow_html=True
-    )
-if findings.infos:
-    st.markdown(
-        _findings_panel("Bilgi talepleri", findings.infos, "I"),
-        unsafe_allow_html=True,
-    )
-
-excluded = excluded_row_views(result)
-if excluded:
-    st.markdown(_excluded_panel(excluded), unsafe_allow_html=True)
+if view == VIEW_DASHBOARD:
+    _render_dashboard(parsed, validation, result, uploaded.name)
+else:
+    _render_comparison(parsed, validation, result)
 
 # --- Alt bilgi ------------------------------------------------------------ #
 st.markdown(

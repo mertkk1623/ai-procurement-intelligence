@@ -17,6 +17,12 @@ Sunum kuralları
 * Eksik maliyet **sıfır gösterilmez**; :data:`MISSING_TEXT` yazılır.
 * En düşük ürün bedeli ve en düşük toplam maliyet ayrı ayrı işaretlenir;
   eşitlikte tüm satırlar işaretlenir.
+
+Dashboard
+---------
+:func:`build_analysis_summary` yüklenen dosyanın **bu oturumdaki** analiz
+özetini üretir. Kalıcı geçmiş yoktur: özet yalnızca eldeki ``parsed``,
+``validation`` ve ``result`` nesnelerinden okunur, hiçbir değer uydurulmaz.
 """
 
 from __future__ import annotations
@@ -38,19 +44,25 @@ __all__ = [
     "LOWEST_BADGE",
     "MISSING_SHIPPING_NOTE",
     "MISSING_TEXT",
+    "AnalysisSummary",
     "ComparisonRow",
     "ExcludedRowView",
     "FindingsView",
     "KpiCard",
+    "SummaryGroup",
+    "SummaryItem",
+    "build_analysis_summary",
     "build_comparison_rows",
     "build_cost_figure",
     "build_kpis",
     "comparison_table_html",
+    "dashboard_chart_metric",
     "excluded_row_views",
     "finding_context",
     "format_days",
     "format_money",
     "format_quantity",
+    "format_quantity_value",
     "format_rate",
     "format_weight",
     "group_findings",
@@ -124,6 +136,26 @@ def format_rate(value: Decimal | None) -> str:
 def format_quantity(value: int) -> str:
     """Adet değerini binlik ayırıcıyla gösterir."""
     return f"{value:,}".replace(",", ".")
+
+
+def format_quantity_value(value: object) -> str | None:
+    """Adet değerini güvenli biçimde metne çevirir; okunamazsa ham metni döndürür.
+
+    Validator ``"500,0"`` gibi virgüllü metni de geçerli sayabildiği için
+    burada doğrudan ``int()`` çağrılmaz: arayüz, doğrulamanın kabul ettiği
+    bir dosyada çökmemelidir.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return format_quantity(int(value))
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return format_quantity(int(Decimal(text.replace(",", "."))))
+    except (InvalidOperation, ValueError):
+        return text
 
 
 def format_days(value: float | int | None) -> str:
@@ -440,7 +472,8 @@ def build_cost_figure(result: CalculationResult, metric: Metric) -> go.Figure | 
     ]
     texts = [f"{format_money(value)} TL" for _row, value in rows]
 
-    # Uzun tedarikçi adları kırpılmasın: sol kenar en uzun etikete göre açılır.
+    # Kenar boşlukları etiket uzunluğuna göre hesaplanır: uzun tedarikçi adı
+    # kırpılmaz, tutar metni çubuk ucunda görünür.
     left_margin = min(240, max(96, max(len(label) for label in labels) * 7))
     right_margin = max(96, max(len(text) for text in texts) * 7)
 
@@ -456,6 +489,9 @@ def build_cost_figure(result: CalculationResult, metric: Metric) -> go.Figure | 
             hovertemplate="%{y}<br>%{text}<extra></extra>",
         )
     )
+    # Kenar boşluğu etiket uzunluğuna göre sabitlenir; dar ekranda da metin
+    # kırpılmaz. Plotly'nin otomatik margin'i önizleme/iframe bağlamında
+    # güvenilir ölçüm yapamıyor, bu yüzden açık değer kullanılır.
     figure.update_layout(
         title=None,
         margin={"l": left_margin, "r": right_margin, "t": 6, "b": 6},
@@ -475,7 +511,6 @@ def build_cost_figure(result: CalculationResult, metric: Metric) -> go.Figure | 
             "autorange": "reversed",
             "showgrid": False,
             "tickfont": {"size": 12, "color": "#101828"},
-            "automargin": False,
         },
         hoverlabel={"font": {"family": "Inter, sans-serif", "size": 12}},
     )
@@ -485,6 +520,187 @@ def build_cost_figure(result: CalculationResult, metric: Metric) -> go.Figure | 
 def figure_title(metric: Metric) -> str:
     """Grafik başlığı."""
     return _METRIC_LABEL[metric]
+
+
+def dashboard_chart_metric(result: CalculationResult) -> Metric | None:
+    """Dashboard grafiğinde kullanılacak metrik.
+
+    Öncelik toplam tedarik maliyetidir. Hiçbir satırda toplam hesaplanamıyorsa
+    (tüm satırlarda nakliye eksik) ürün bedeline düşülür; ikisi de yoksa
+    grafik çizilmez. Karar yalnızca motorun değerlerine bakar.
+    """
+    if _chart_rows(result, "total"):
+        return "total"
+    if _chart_rows(result, "product"):
+        return "product"
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard — analiz özeti
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryItem:
+    """Analiz özetindeki tek alan."""
+
+    label: str
+    value: str
+    note: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryGroup:
+    """Özet alanlarının başlıklı grubu."""
+
+    title: str
+    items: tuple[SummaryItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisSummary:
+    """Yüklenen dosyanın bu oturumdaki analiz özeti.
+
+    Kalıcı geçmiş değildir: yalnızca eldeki parse/validate/calculate
+    çıktısını özetler, sonraki yüklemelerde yeniden üretilir.
+    """
+
+    file_name: str
+    status_label: str
+    status_tone: Literal["ok", "warn", "error"]
+    status_detail: str
+    groups: tuple[SummaryGroup, ...]
+
+
+def _summary_status(
+    parsed: ParsedWorkbook, validation: ValidationResult, result: CalculationResult
+) -> tuple[str, Literal["ok", "warn", "error"], str]:
+    """Durum etiketi, tonu ve tek cümlelik açıklaması."""
+    errors = len(validation.errors)
+    warnings = len(validation.warnings)
+    excluded = len(result.excluded)
+    missing = len(result.missing_data_rows)
+
+    if validation.file_rejected:
+        return (
+            "Dosya reddedildi",
+            "error",
+            "Dosya düzeyinde hata var; hiçbir satır hesaplanmadı.",
+        )
+    if not parsed.suppliers:
+        return (
+            "Teklif satırı yok",
+            "warn",
+            "Supplier Quotes sayfasında doldurulmuş satır bulunmuyor.",
+        )
+    if errors:
+        return (
+            "Kısmi karşılaştırma",
+            "error",
+            f"{errors} hata, {excluded} satırı karşılaştırmaya almıyor.",
+        )
+    if missing:
+        return (
+            "Eksik veri var",
+            "warn",
+            f"{missing} satırda nakliye bilgisi eksik; toplam maliyet hesaplanmadı.",
+        )
+    if warnings:
+        return (
+            "Uyarılarla tamamlandı",
+            "warn",
+            f"{warnings} uyarı var; hesaplama etkilenmedi.",
+        )
+    return (
+        "Karşılaştırma hazır",
+        "ok",
+        "Dosya doğrulamadan hatasız geçti.",
+    )
+
+
+def _count_text(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
+
+
+def build_analysis_summary(
+    parsed: ParsedWorkbook,
+    validation: ValidationResult,
+    result: CalculationResult,
+    *,
+    file_name: str,
+) -> AnalysisSummary:
+    """Dashboard için dosya ve doğrulama özetini üretir.
+
+    Sayılar doğrudan parse/validate/calculate çıktısından okunur; burada
+    hiçbir maliyet veya bulgu yeniden hesaplanmaz.
+    """
+    rfq = parsed.rfq
+    status_label, tone, status_detail = _summary_status(parsed, validation, result)
+
+    file_items: list[SummaryItem] = [SummaryItem("Dosya", file_name)]
+    if rfq.rfq_number:
+        file_items.append(SummaryItem("Talep", str(rfq.rfq_number)))
+    if rfq.profile_specification:
+        file_items.append(
+            SummaryItem("Ürün", str(rfq.profile_specification))
+        )
+    quantity = format_quantity_value(rfq.quantity_pcs)
+    if quantity:
+        file_items.append(SummaryItem("Miktar", f"{quantity} adet"))
+    if rfq.delivery_location:
+        file_items.append(SummaryItem("Teslim yeri", str(rfq.delivery_location)))
+
+    errors = len(validation.errors)
+    warnings = len(validation.warnings)
+    infos = len(validation.infos)
+    excluded = len(result.excluded)
+    missing = len(result.missing_data_rows)
+
+    check_items: list[SummaryItem] = [
+        SummaryItem("Tedarikçi satırı", str(len(parsed.suppliers))),
+        SummaryItem(
+            "Hesaplanan teklif",
+            str(len(result.rows)),
+            note=(
+                f"{_count_text(excluded, 'satır', 'satır')} karşılaştırmaya alınmadı"
+                if excluded
+                else ""
+            ),
+        ),
+        SummaryItem(
+            "Hatalar",
+            str(errors),
+            note="Karşılaştırmayı engeller" if errors else "",
+        ),
+        SummaryItem(
+            "Uyarılar",
+            str(warnings),
+            note="Hesaplamayı durdurmaz" if warnings else "",
+        ),
+        SummaryItem("Bilgi talepleri", str(infos)),
+    ]
+    # Sıfır değerli "eksik nakliye" satırı gösterilmez: olmayan bir sorunu
+    # sayı olarak öne çıkarmak yanıltıcı olur.
+    if missing:
+        check_items.append(
+            SummaryItem(
+                "Eksik nakliye",
+                _count_text(missing, "satır", "satır"),
+                note="Toplam maliyet gösterilmez",
+            )
+        )
+
+    return AnalysisSummary(
+        file_name=file_name,
+        status_label=status_label,
+        status_tone=tone,
+        status_detail=status_detail,
+        groups=(
+            SummaryGroup("Teklif dosyası", tuple(file_items)),
+            SummaryGroup("Doğrulama", check_items),
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
