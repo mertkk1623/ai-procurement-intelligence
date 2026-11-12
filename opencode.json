@@ -1,0 +1,19 @@
+﻿{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "deploy/deepseek-ai/deepseek-v4.1-flash-1017",
+  "providers": {
+    "deploy": {
+      "name": "Deploy",
+      "env": ["DEPLOY_API_KEY"],
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "https://api-cdn.deploy.com/api/v1"
+      },
+      "models": {
+        "deepseek-ai/deepseek-v4.1-flash-1017": {
+          "name": "DeepSeek V4.1 Flash 1017"
+        }
+      }
+    }
+  }
+}

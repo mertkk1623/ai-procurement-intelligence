@@ -1,0 +1,27 @@
+# AI Procurement Intelligence — doğrudan bağımlılıklar
+# Kaynak: docs/PROJECT_BRIEF.md §8 (Teknoloji)
+# Sürümler mevcut .venv içindeki kurulu sürümlerle sabitlenmiştir.
+
+# Arayüz
+streamlit==1.67.0
+
+# Veri işleme
+pandas==3.1.1
+
+# Excel okuma/yazma
+openpyxl==3.1.5
+
+# Grafikler
+plotly==7.1.0
+
+# PDF raporu
+reportlab==5.1.0
+
+# AI (Deploy — OpenAI uyumlu API)
+openai==3.49.0
+
+# Ortam değişkeni (DEPLOY_API_KEY)
+python-dotenv==1.2.4
+
+# Test
+pytest==9.2.0
