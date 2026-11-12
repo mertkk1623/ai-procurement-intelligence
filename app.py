@@ -18,6 +18,7 @@ Otomatik kazanan, puanlama veya sıralama üretilmez.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import sys
 import tempfile
@@ -30,6 +31,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
+from procurement import ai_analysis  # noqa: E402
 from procurement.calculator import CalculationResult, calculate  # noqa: E402
 from procurement.excel_parser import (  # noqa: E402
     ExcelParserError,
@@ -61,7 +63,8 @@ PRODUCT_LINE = "Galvanizli kare kutu profil · 40 × 40 × 2 mm · 6 m · TL"
 
 VIEW_DASHBOARD = "Dashboard"
 VIEW_COMPARISON = "Tedarikçi karşılaştırması"
-VIEW_OPTIONS = (VIEW_DASHBOARD, VIEW_COMPARISON)
+VIEW_AI = "AI analizi"
+VIEW_OPTIONS = (VIEW_DASHBOARD, VIEW_COMPARISON, VIEW_AI)
 
 # --------------------------------------------------------------------------- #
 # Stil
@@ -533,6 +536,79 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
 }
 .summary-note { font-size: 0.6875rem; color: var(--muted); line-height: 1.4; }
 
+/* ------------------------------------------------------------- ai-panel --- */
+.ai-intro {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.125rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.ai-intro h3 {
+  margin: 0 0 0.35rem; font-size: 0.9375rem; font-weight: 600; color: var(--ink);
+}
+.ai-intro p {
+  margin: 0; font-size: 0.8125rem; color: var(--ink-soft); line-height: 1.55;
+}
+.ai-meta {
+  display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem;
+  margin-top: 0.75rem; font-size: 0.6875rem; color: var(--muted);
+}
+.ai-meta span {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+}
+.ai-legend {
+  margin: 0.75rem 0 0; padding: 0;
+  list-style: none;
+  display: flex; flex-wrap: wrap; gap: 0.35rem 1rem;
+  font-size: 0.75rem; color: var(--ink-soft);
+}
+.ai-legend li { display: flex; align-items: center; gap: 0.35rem; }
+.ai-legend b {
+  font-weight: 600; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ai-status {
+  display: flex; align-items: flex-start; gap: 0.6rem;
+  padding: 0.875rem 1.125rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 0.8125rem; color: var(--ink-soft); line-height: 1.55;
+  margin-bottom: 1rem;
+}
+.ai-status strong { color: var(--ink); font-weight: 600; }
+.ai-status.is-error { background: var(--danger-bg); border-color: var(--danger-border); }
+.ai-status.is-error, .ai-status.is-error strong { color: #912018; }
+.ai-status.is-warn { background: var(--warn-bg); border-color: var(--warn-border); }
+.ai-status.is-warn, .ai-status.is-warn strong { color: #93370d; }
+.ai-status ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
+.ai-status li { font-size: 0.75rem; }
+.ai-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.125rem 1.25rem;
+  margin-bottom: 0.875rem;
+}
+.ai-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.ai-section p {
+  margin: 0; font-size: 0.875rem; color: var(--ink-soft); line-height: 1.65;
+  white-space: pre-line;
+}
+.ai-foot {
+  margin: 0.5rem 0 0; font-size: 0.6875rem; color: var(--muted); line-height: 1.5;
+}
+
 /* ------------------------------------------------------------ responsive --- */
 @media (max-width: 720px) {
   [data-testid="stAppViewContainer"] > .main .block-container,
@@ -600,6 +676,17 @@ def _rfq_quantity_text(value: object) -> str | None:
     böylece arayüz ile dashboard özeti aynı kuralı kullanır.
     """
     return format_quantity_value(value)
+
+
+def _file_signature(uploaded) -> str:
+    """Yüklenen dosyanın içeriğinden kısa bir imza üretir.
+
+    AI analizi oturumda saklandığı için imza değişince eski sonuç
+    temizlenir; böylece yeni dosyanın analizi eski dosyanın metniyle
+    karışmaz. İçerik loglanmaz, yalnızca özeti tutulur.
+    """
+    payload = uploaded.getvalue() if hasattr(uploaded, "getvalue") else b""
+    return f"{uploaded.name}:{hashlib.sha256(payload).hexdigest()[:16]}"
 
 
 def _meta_strip(parsed: ParsedWorkbook) -> str:
@@ -938,6 +1025,131 @@ def _render_comparison(
         st.markdown(_excluded_panel(excluded), unsafe_allow_html=True)
 
 
+def _render_ai(
+    parsed: ParsedWorkbook,
+    validation: ValidationResult,
+    result: CalculationResult,
+    file_signature: str,
+) -> None:
+    """AI yorumu görünümü: kullanıcı isterse tek seferlik analiz üretir."""
+    st.markdown(
+        _section_head(
+            "AI analizi",
+            "Doğrulanmış ve hesaplanmış sonuçların yorumu. Karar vermez, "
+            "sıralama üretmez, maliyet hesaplamaz.",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    block_reason = ai_analysis.analysis_block_reason(validation, result)
+    has_key = ai_analysis.api_key() is not None
+
+    meta: list[str] = []
+    meta.append(f"{len(result.rows)} hesaplanan teklif")
+    meta.append("Tedarikçi adları maskelenir")
+    if not has_key:
+        meta.append(f"{ai_analysis.API_KEY_ENV} tanımlı değil")
+    meta_html = "".join(f"<span>{html.escape(item)}</span>" for item in meta)
+
+    st.markdown(
+        '<div class="ai-intro">'
+        "<h3>Satın alma değerlendirmesi</h3>"
+        "<p>Analiz yalnızca aşağıdaki hesaplanmış verilerle üretilir. Ham Excel "
+        "içeriği, notlar ve tedarikçi adları gönderilmez. Sonuç yalnızca bu "
+        "oturumda tutulur; geçmiş saklanmaz.</p>"
+        f'<div class="ai-meta">{meta_html}</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    if block_reason is not None:
+        st.markdown(
+            f'<div class="ai-status is-warn"><div>'
+            f"<strong>AI analizi kullanılamıyor.</strong> "
+            f"{html.escape(block_reason)}</div></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    if not has_key:
+        st.markdown(
+            '<div class="ai-status is-warn"><div>'
+            "<strong>API anahtarı bulunamadı.</strong> "
+            f"AI analizi için <code>{ai_analysis.API_KEY_ENV}</code> ortam değişkenini "
+            "veya <code>.env</code> dosyasını tanımlayın. Diğer tüm özellikler "
+            "anahtar olmadan çalışır.</div></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    signature = (
+        file_signature,
+        len(result.rows),
+        str(result.lowest_product_cost),
+        str(result.lowest_total_cost),
+        tuple(f.code for f in validation.findings),
+    )
+    if st.session_state.get("ai_signature") != signature:
+        st.session_state.pop("ai_analysis", None)
+        st.session_state.pop("ai_error", None)
+        st.session_state["ai_signature"] = signature
+
+    if st.button("AI analizini oluştur", key="ai-run", type="primary"):
+        with st.spinner("Analiz oluşturuluyor…"):
+            try:
+                st.session_state["ai_analysis"] = ai_analysis.analyze(
+                    parsed, validation, result
+                )
+                st.session_state.pop("ai_error", None)
+            except ai_analysis.AIAnalysisError as error:
+                st.session_state.pop("ai_analysis", None)
+                st.session_state["ai_error"] = error
+
+    error = st.session_state.get("ai_error")
+    if error is not None:
+        details = ""
+        if error.details:
+            items = "".join(
+                f"<li>{html.escape(item)}</li>" for item in error.details
+            )
+            details = f"<p>Kaynakla eşleşmeyen ifadeler:</p><ul>{items}</ul>"
+        st.markdown(
+            f'<div class="ai-status is-error"><div>'
+            f"<strong>Analiz üretilemedi.</strong> {html.escape(str(error))}"
+            f"{details}</div></div>",
+            unsafe_allow_html=True,
+        )
+
+    analysis: ai_analysis.AIAnalysis | None = st.session_state.get("ai_analysis")
+    if analysis is None:
+        return
+
+    legend = "".join(
+        f"<li><b>{html.escape(label)}</b> {html.escape(name)}</li>"
+        for label, name in analysis.legend
+    )
+    if legend:
+        st.markdown(
+            f'<ul class="ai-legend">{legend}</ul>',
+            unsafe_allow_html=True,
+        )
+
+    for section in analysis.sections:
+        st.markdown(
+            f'<div class="ai-section"><h3>{html.escape(section.title)}</h3>'
+            f"<p>{html.escape(section.body)}</p></div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        '<p class="ai-foot">AI yorumu yalnızca doğrulanmış sonuçları açıklar; '
+        "maliyet hesaplamaz, tedarikçi sıralamaz ve kazanan belirlemez. "
+        f"Model: <code>{html.escape(analysis.model)}</code> · "
+        "Sayısal ifadeler kaynak verilerle karşılaştırılmıştır.</p>",
+        unsafe_allow_html=True,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Sayfa
 # --------------------------------------------------------------------------- #
@@ -1049,8 +1261,10 @@ if view is None:
 
 if view == VIEW_DASHBOARD:
     _render_dashboard(parsed, validation, result, uploaded.name)
-else:
+elif view == VIEW_COMPARISON:
     _render_comparison(parsed, validation, result)
+else:
+    _render_ai(parsed, validation, result, _file_signature(uploaded))
 
 # --- Alt bilgi ------------------------------------------------------------ #
 st.markdown(

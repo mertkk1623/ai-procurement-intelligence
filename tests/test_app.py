@@ -13,6 +13,7 @@ senaryosu için gereken hücre değiştirilir.
 
 from __future__ import annotations
 
+import html
 import json
 import shutil
 from pathlib import Path
@@ -20,6 +21,8 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 from streamlit.testing.v1 import AppTest
+
+from procurement import ai_analysis
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app.py"
@@ -90,6 +93,7 @@ def _set(sheet: str, cell: str, value):
 
 DASHBOARD = "Dashboard"
 COMPARISON = "Tedarikçi karşılaştırması"
+AI_VIEW = "AI analizi"
 
 
 def _view(test: AppTest, label: str) -> AppTest:
@@ -431,7 +435,7 @@ def test_dashboard_offers_navigation_between_views(tmp_path):
     test = _upload(_app(), _workbook_bytes(tmp_path))
     options = test.segmented_control[0].options
 
-    assert list(options) == [DASHBOARD, COMPARISON]
+    assert list(options) == [DASHBOARD, COMPARISON, AI_VIEW]
 
 
 def test_dashboard_shows_four_kpi_cards(tmp_path):
@@ -588,6 +592,182 @@ def test_switching_back_to_dashboard_keeps_kpis(tmp_path):
     test = _view(test, DASHBOARD)
     assert _table_html(test) == ""
     assert "Genel özet" in _markdown(test)
+
+
+# --------------------------------------------------------------------------- #
+# AI analizi görünümü
+# --------------------------------------------------------------------------- #
+
+
+def _ai(test: AppTest) -> AppTest:
+    """AI analizi görünümüne geçer."""
+    return _view(test, AI_VIEW)
+
+
+def _without_api_key(monkeypatch) -> None:
+    """Ortamdan API anahtarını kaldırır; .env okumasını da kapatır."""
+    monkeypatch.delenv(ai_analysis.API_KEY_ENV, raising=False)
+    monkeypatch.setattr(
+        "procurement.ai_analysis._load_dotenv", lambda: None
+    )
+
+
+def test_ai_view_is_reachable_and_asks_for_explicit_action(tmp_path):
+    test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+    text = _markdown(test)
+
+    assert test.segmented_control[0].value == AI_VIEW
+    assert "AI analizi" in text
+    assert "Executive Summary" not in text  # kullanıcı butona basmadan çağrı yok
+
+
+def test_ai_view_has_run_button(tmp_path):
+    test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+
+    assert len(test.button) == 1
+    assert test.button[0].label == "AI analizini oluştur"
+
+
+def test_ai_view_without_api_key_shows_config_notice(tmp_path, monkeypatch):
+    _without_api_key(monkeypatch)
+    test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+    text = _markdown(test)
+
+    assert "API anahtarı bulunamadı" in text
+    assert ai_analysis.API_KEY_ENV in text
+    assert len(test.button) == 0
+
+
+def test_ai_view_does_not_call_api_before_button(tmp_path, monkeypatch):
+    _without_api_key(monkeypatch)
+    calls: list[int] = []
+    monkeypatch.setattr(
+        ai_analysis, "analyze", lambda *a, **k: calls.append(1)
+    )
+    _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+
+    assert calls == []
+
+
+def test_ai_view_rejected_file_has_no_ai_section(tmp_path, monkeypatch):
+    _without_api_key(monkeypatch)
+    test = _upload(_app(), _workbook_bytes(tmp_path, vat="HAYIR"))
+
+    assert len(test.segmented_control) == 0
+    assert "AI analizi" not in _markdown(test)
+    assert "Satın alma değerlendirmesi" not in _markdown(test)
+
+
+def test_ai_view_reports_service_error(tmp_path, monkeypatch):
+    monkeypatch.setenv(ai_analysis.API_KEY_ENV, "test-anahtar")
+
+    def failing(*args, **kwargs):
+        raise ai_analysis.AIAnalysisError(
+            "AI servisi zaman aşımına uğradı. Lütfen tekrar deneyin.",
+            kind="timeout",
+        )
+
+    monkeypatch.setattr(ai_analysis, "analyze", failing)
+    test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+    test.button[0].click()
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+    text = _markdown(test)
+
+    assert "Analiz üretilemedi" in text
+    assert "zaman aşımı" in text
+    assert "is-error" in text
+
+
+def test_ai_view_renders_sections_after_run(tmp_path, monkeypatch):
+    monkeypatch.setenv(ai_analysis.API_KEY_ENV, "test-anahtar")
+
+    analysis = ai_analysis.AIAnalysis(
+        sections=tuple(
+            ai_analysis.AiSection(key=key, title=title, body=f"{title} metni.")
+            for key, title in ai_analysis.SECTION_TITLES
+        ),
+        model="deepseek-ai/deepseek-v4.1-flash-1017",
+        legend=(("Tedarikçi 1", "Bursa Metal A.Ş."),),
+    )
+    monkeypatch.setattr(ai_analysis, "analyze", lambda *a, **k: analysis)
+
+    test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+    test.button[0].click()
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+    text = _markdown(test)
+
+    for _key, title in ai_analysis.SECTION_TITLES:
+        assert html.escape(title) in text
+        assert html.escape(f"{title} metni.") in text
+    assert "Tedarikçi 1" in text
+    assert "Bursa Metal A.Ş." in text
+
+
+def test_ai_view_shows_unverified_figure_details(tmp_path, monkeypatch):
+    monkeypatch.setenv(ai_analysis.API_KEY_ENV, "test-anahtar")
+
+    def failing(*args, **kwargs):
+        raise ai_analysis.AIAnalysisError(
+            "Kaynakla eşleşmeyen ifadeler var.",
+            kind="unverified",
+            details=("999.999,00 TL",),
+        )
+
+    monkeypatch.setattr(ai_analysis, "analyze", failing)
+    test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+    test.button[0].click()
+    test.run()
+    text = _markdown(test)
+
+    assert "Kaynakla eşleşmeyen ifadeler" in text
+    assert "999.999,00 TL" in text
+
+
+def test_ai_view_available_with_missing_shipping(tmp_path, monkeypatch):
+    """Eksik nakliye analizi engellemez; buton görünür kalır."""
+    monkeypatch.setenv(ai_analysis.API_KEY_ENV, "test-anahtar")
+    test = _ai(
+        _upload(
+            _app(),
+            _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None)),
+        )
+    )
+    text = _markdown(test)
+
+    assert len(test.button) == 1
+    assert "AI analizi kullanılamıyor" not in text
+
+
+def test_ai_view_clears_previous_analysis_on_new_file(tmp_path, monkeypatch):
+    monkeypatch.setenv(ai_analysis.API_KEY_ENV, "test-anahtar")
+
+    analysis = ai_analysis.AIAnalysis(
+        sections=(
+            ai_analysis.AiSection(
+                key="executive_summary",
+                title="Executive Summary",
+                body="Önceki dosyanın yorumu.",
+            ),
+        ),
+        model="test-model",
+        legend=(),
+    )
+    monkeypatch.setattr(ai_analysis, "analyze", lambda *a, **k: analysis)
+
+    test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+    test.button[0].click()
+    test.run()
+    assert "Önceki dosyanın yorumu." in _markdown(test)
+
+    # Yeni (farklı) dosya yüklenince eski analiz gösterilmez.
+    other = _workbook_bytes(tmp_path, _set("Supplier Quotes", "H3", None))
+    test.file_uploader[0].set_value(("yeni.xlsx", other, XLSX_MIME))
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+
+    assert "Önceki dosyanın yorumu." not in _markdown(test)
 
 
 # --------------------------------------------------------------------------- #
