@@ -56,6 +56,15 @@ from procurement.presentation import (  # noqa: E402
     group_findings,
     rejection_hints,
 )
+from procurement.report import (  # noqa: E402
+    EXCEL_FILENAME,
+    EXCEL_MIME,
+    PDF_FILENAME,
+    PDF_MIME,
+    ReportError,
+    build_excel_report,
+    build_pdf_report,
+)
 from procurement.validator import Finding, ValidationResult, validate  # noqa: E402
 
 APP_TITLE = "AI Procurement Intelligence"
@@ -609,6 +618,24 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   margin: 0.5rem 0 0; font-size: 0.6875rem; color: var(--muted); line-height: 1.5;
 }
 
+/* --------------------------------------------------------------- reports --- */
+.st-key-reports {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.125rem 1.25rem;
+  box-shadow: var(--shadow);
+  margin-top: 1.5rem;
+}
+.st-key-reports [data-testid="stDownloadButton"] button {
+  border-radius: 9px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.report-note {
+  margin: 0.75rem 0 0; font-size: 0.6875rem; color: var(--muted); line-height: 1.5;
+}
+
 /* ------------------------------------------------------------ responsive --- */
 @media (max-width: 720px) {
   [data-testid="stAppViewContainer"] > .main .block-container,
@@ -687,6 +714,38 @@ def _file_signature(uploaded) -> str:
     """
     payload = uploaded.getvalue() if hasattr(uploaded, "getvalue") else b""
     return f"{uploaded.name}:{hashlib.sha256(payload).hexdigest()[:16]}"
+
+
+def _analysis_signature(
+    file_signature: str,
+    validation: ValidationResult,
+    result: CalculationResult,
+) -> tuple[object, ...]:
+    """AI yorumunun hangi sonuçlara ait olduğunu belirleyen imza."""
+    return (
+        file_signature,
+        len(result.rows),
+        str(result.lowest_product_cost),
+        str(result.lowest_total_cost),
+        tuple(f.code for f in validation.findings),
+    )
+
+
+def _current_analysis(
+    signature: tuple[object, ...],
+) -> ai_analysis.AIAnalysis | None:
+    """Oturumdaki AI yorumunu yalnızca imzası eşleşiyorsa döndürür.
+
+    Dosya değiştiğinde eski yorum ve hata temizlenir; böylece raporda başka
+    bir dosyanın AI yorumu görünmez.
+    """
+    if st.session_state.get("ai_signature") != signature:
+        st.session_state.pop("ai_analysis", None)
+        st.session_state.pop("ai_error", None)
+        st.session_state["ai_signature"] = signature
+        return None
+    analysis: ai_analysis.AIAnalysis | None = st.session_state.get("ai_analysis")
+    return analysis
 
 
 def _meta_strip(parsed: ParsedWorkbook) -> str:
@@ -1082,17 +1141,8 @@ def _render_ai(
         )
         return
 
-    signature = (
-        file_signature,
-        len(result.rows),
-        str(result.lowest_product_cost),
-        str(result.lowest_total_cost),
-        tuple(f.code for f in validation.findings),
-    )
-    if st.session_state.get("ai_signature") != signature:
-        st.session_state.pop("ai_analysis", None)
-        st.session_state.pop("ai_error", None)
-        st.session_state["ai_signature"] = signature
+    signature = _analysis_signature(file_signature, validation, result)
+    _current_analysis(signature)  # imza değiştiyse eski yorumu temizler
 
     if st.button("AI analizini oluştur", key="ai-run", type="primary"):
         with st.spinner("Analiz oluşturuluyor…"):
@@ -1148,6 +1198,82 @@ def _render_ai(
         "Sayısal ifadeler kaynak verilerle karşılaştırılmıştır.</p>",
         unsafe_allow_html=True,
     )
+
+
+def _render_reports(
+    parsed: ParsedWorkbook,
+    validation: ValidationResult,
+    result: CalculationResult,
+    file_name: str,
+    file_signature: str,
+) -> None:
+    """Excel ve PDF raporlarını indirilebilir olarak sunar.
+
+    Raporlar her çizimde bellekte üretilir; dosya sistemi veya rapor geçmişi
+    kullanılmaz. Bu oturumda üretilmiş AI yorumu varsa rapora **ayrı ve
+    etiketli** bölüm olarak eklenir; yoksa rapor AI bölümü olmadan üretilir.
+    """
+    analysis = _current_analysis(
+        _analysis_signature(file_signature, validation, result)
+    )
+
+    with st.container(key="reports"):
+        st.markdown(
+            _section_head(
+                "Raporlar",
+                "Karşılaştırma, doğrulama bulguları ve varsayımlar. Dosyalar "
+                "yalnızca indirme anında üretilir; saklanmaz.",
+            ),
+            unsafe_allow_html=True,
+        )
+
+        try:
+            excel = build_excel_report(
+                parsed, validation, result, file_name=file_name, analysis=analysis
+            )
+            pdf = build_pdf_report(
+                parsed, validation, result, file_name=file_name, analysis=analysis
+            )
+        except ReportError as error:
+            st.markdown(
+                '<div class="ai-status is-error"><div>'
+                f"<strong>Rapor oluşturulamadı.</strong> {html.escape(str(error))}"
+                "</div></div>",
+                unsafe_allow_html=True,
+            )
+            return
+
+        columns = st.columns(2)
+        with columns[0]:
+            st.download_button(
+                "Excel raporunu indir",
+                data=excel,
+                file_name=EXCEL_FILENAME,
+                mime=EXCEL_MIME,
+                key="download-excel",
+                type="primary",
+            )
+        with columns[1]:
+            st.download_button(
+                "PDF raporunu indir",
+                data=pdf,
+                file_name=PDF_FILENAME,
+                mime=PDF_MIME,
+                key="download-pdf",
+            )
+
+        note = (
+            "Bu oturumda oluşturulan AI yorumu rapora ayrı ve etiketli bölüm "
+            "olarak eklenir."
+            if analysis is not None
+            else "AI yorumu henüz oluşturulmadı; raporlar AI bölümü olmadan "
+            "üretilir."
+        )
+        st.markdown(
+            f'<p class="report-note">Maliyetler KDV hariç TL\'dir. Eksik veri '
+            f"sıfır olarak gösterilmez. {html.escape(note)}</p>",
+            unsafe_allow_html=True,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1265,6 +1391,10 @@ elif view == VIEW_COMPARISON:
     _render_comparison(parsed, validation, result)
 else:
     _render_ai(parsed, validation, result, _file_signature(uploaded))
+
+_render_reports(
+    parsed, validation, result, uploaded.name, _file_signature(uploaded)
+)
 
 # --- Alt bilgi ------------------------------------------------------------ #
 st.markdown(

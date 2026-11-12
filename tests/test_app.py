@@ -835,6 +835,95 @@ def test_upload_does_not_write_files(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Rapor indirme
+# --------------------------------------------------------------------------- #
+
+
+def test_report_download_buttons_are_available(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    labels = [button.label for button in test.download_button]
+
+    assert labels == ["Excel raporunu indir", "PDF raporunu indir"]
+    assert "Raporlar" in _markdown(test)
+
+
+def test_report_download_buttons_show_expected_file_names(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    urls = [button.proto.url for button in test.download_button]
+
+    assert urls[0].endswith(".xlsx")
+    assert urls[1].endswith(".pdf")
+
+
+def test_reports_are_available_on_every_view(tmp_path):
+    payload = _workbook_bytes(tmp_path)
+    test = _upload(_app(), payload)
+
+    for view in (DASHBOARD, COMPARISON, AI_VIEW):
+        test = _view(test, view)
+        assert len(test.download_button) == 2
+
+
+def test_report_note_states_ai_section_is_optional(tmp_path):
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    assert "AI bölümü olmadan" in text
+    assert "KDV hariç" in text
+
+
+def test_reports_include_existing_ai_analysis(tmp_path, monkeypatch):
+    monkeypatch.setenv(ai_analysis.API_KEY_ENV, "test-anahtar")
+    analysis = ai_analysis.AIAnalysis(
+        sections=(
+            ai_analysis.AiSection(
+                key="executive_summary",
+                title="Executive Summary",
+                body="Yorum metni.",
+            ),
+        ),
+        model="test-model",
+        legend=(),
+    )
+    monkeypatch.setattr(ai_analysis, "analyze", lambda *a, **k: analysis)
+
+    test = _ai(_upload(_app(), _workbook_bytes(tmp_path)))
+    test.button[0].click()
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+
+    text = _markdown(test)
+    assert "Raporlar" in text
+    assert "ayrı ve etiketli bölüm olarak eklenir" in text
+
+
+def test_report_error_is_shown_to_user(tmp_path, monkeypatch):
+    """Rapor üretimi patlarsa kullanıcıya anlaşılır hata gösterilir."""
+    def broken(*args, **kwargs):
+        raise RuntimeError("iç ayrıntı: C:/gizli/yol")
+
+    monkeypatch.setattr("procurement.report._summary_sheet", broken)
+
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    assert "Rapor oluşturulamadı" in text
+    assert "Excel raporu oluşturulamadı" in text
+    assert "C:/gizli/yol" not in text
+    assert len(test.download_button) == 0
+
+
+def test_report_does_not_write_files(tmp_path):
+    """Raporlar yalnızca bellekte üretilir; diskte dosya bırakmaz."""
+    before = {path.name for path in ROOT.iterdir()}
+    test = _upload(_app(), _workbook_bytes(tmp_path))
+    assert len(test.download_button) == 2
+    after = {path.name for path in ROOT.iterdir()}
+
+    assert after == before
+
+
+# --------------------------------------------------------------------------- #
 # Biçimsel sınır durumları
 # --------------------------------------------------------------------------- #
 
