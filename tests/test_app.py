@@ -76,6 +76,19 @@ def _markdown(test: AppTest) -> str:
     return "\n".join(block.value for block in test.markdown)
 
 
+def _visible_markdown(test: AppTest) -> str:
+    """``_markdown`` gibi çalışır; global ``<style>`` bloğunu dışarıda bırakır.
+
+    CSS sınıf adları da metinde aranabildiği için görünüm içeriği testleri
+    stil tanımlarından arındırılmış metin üzerinde çalışır.
+    """
+    return "\n".join(
+        block.value
+        for block in test.markdown
+        if not block.value.lstrip().startswith("<style>")
+    )
+
+
 def _table_html(test: AppTest) -> str:
     """Karşılaştırma tablosunun HTML'ini döndürür; yoksa boş metin."""
     for block in test.markdown:
@@ -94,6 +107,7 @@ def _set(sheet: str, cell: str, value):
 DASHBOARD = "Dashboard"
 COMPARISON = "Tedarikçi karşılaştırması"
 AI_VIEW = "AI analizi"
+ROADMAP = "Product Roadmap"
 
 
 def _view(test: AppTest, label: str) -> AppTest:
@@ -511,7 +525,7 @@ def test_dashboard_offers_navigation_between_views(tmp_path):
     test = _upload(_app(), _workbook_bytes(tmp_path))
     options = test.segmented_control[0].options
 
-    assert list(options) == [DASHBOARD, COMPARISON, AI_VIEW]
+    assert list(options) == [DASHBOARD, COMPARISON, AI_VIEW, ROADMAP]
 
 
 def test_dashboard_shows_four_kpi_cards(tmp_path):
@@ -668,6 +682,113 @@ def test_switching_back_to_dashboard_keeps_kpis(tmp_path):
     test = _view(test, DASHBOARD)
     assert _table_html(test) == ""
     assert "Genel özet" in _markdown(test)
+
+
+# --------------------------------------------------------------------------- #
+# Product Roadmap görünümü
+# --------------------------------------------------------------------------- #
+
+
+def _roadmap(test: AppTest) -> AppTest:
+    """Product Roadmap görünümüne geçer."""
+    return _view(test, ROADMAP)
+
+
+def test_roadmap_view_is_reachable(tmp_path):
+    test = _roadmap(_upload(_app(), _workbook_bytes(tmp_path)))
+    text = _visible_markdown(test)
+
+    assert test.segmented_control[0].value == ROADMAP
+    assert "Product Roadmap" in text
+    assert "roadmap-track" in text
+
+
+def test_roadmap_shows_three_stages_with_titles_and_status(tmp_path):
+    test = _roadmap(_upload(_app(), _workbook_bytes(tmp_path)))
+    text = _visible_markdown(test)
+
+    for phase, title, status in (
+        ("V1", "Core Procurement Platform", "LIVE"),
+        ("V2", "Procurement Intelligence", "PLANNED"),
+        ("V3", "Enterprise Procurement", "FUTURE"),
+    ):
+        assert phase in text
+        assert title in text
+        assert status in text
+
+    assert text.count('class="roadmap-stage') == 3
+
+
+def test_roadmap_v1_lists_all_shipped_capabilities(tmp_path):
+    test = _roadmap(_upload(_app(), _workbook_bytes(tmp_path)))
+    text = _visible_markdown(test)
+
+    for feature in (
+        "Excel Supplier Quote Upload",
+        "Automated Data Validation",
+        "Procurement Cost Calculation",
+        "Supplier Comparison Dashboard",
+        "AI-Powered Procurement Analysis",
+        "Excel &amp; PDF Reporting",
+    ):
+        assert feature in text
+
+
+def test_roadmap_v2_and_v3_list_planned_capabilities(tmp_path):
+    test = _roadmap(_upload(_app(), _workbook_bytes(tmp_path)))
+    text = _visible_markdown(test)
+
+    for feature in (
+        "Advanced Product Specifications",
+        "AI Price Forecasting",
+        "Logistics Optimization",
+        "Advanced Cost Analysis",
+        "Supplier Portal",
+        "ERP / SAP Integrations",
+        "Persistent Analysis History",
+        "Multi-Currency Support",
+    ):
+        assert feature in text
+
+
+def test_roadmap_marks_only_v1_as_live(tmp_path):
+    test = _roadmap(_upload(_app(), _workbook_bytes(tmp_path)))
+    text = _visible_markdown(test)
+
+    assert 'class="roadmap-stage is-live"' in text
+    assert 'class="roadmap-stage is-planned"' in text
+    assert 'class="roadmap-stage is-future"' in text
+    assert text.count("is-live") == 2  # kart + durum rozeti
+    assert "henüz kullanıma açık değildir" in text
+
+
+def test_roadmap_does_not_render_analysis_or_comparison(tmp_path):
+    """Roadmap sunumdur: tablo, KPI veya grafik üretmez."""
+    test = _roadmap(_upload(_app(), _workbook_bytes(tmp_path)))
+    text = _visible_markdown(test)
+
+    assert _table_html(test) == ""
+    assert len(test.get("plotly_chart")) == 0
+    assert "Genel özet" not in text
+
+
+def test_roadmap_reports_remain_available(tmp_path):
+    """Mevcut akış korunur: rapor indirmeleri roadmap görünümünde de durur."""
+    test = _roadmap(_upload(_app(), _workbook_bytes(tmp_path)))
+    labels = [button.label for button in test.download_button]
+
+    assert labels == ["Excel raporunu indir", "PDF raporunu indir"]
+
+
+def test_switching_from_roadmap_back_to_dashboard(tmp_path):
+    test = _roadmap(_upload(_app(), _workbook_bytes(tmp_path)))
+    assert "roadmap-track" in _visible_markdown(test)
+
+    test = _view(test, DASHBOARD)
+    text = _visible_markdown(test)
+
+    assert "roadmap-track" not in text
+    assert "Genel özet" in text
 
 
 # --------------------------------------------------------------------------- #

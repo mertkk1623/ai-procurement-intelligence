@@ -76,7 +76,8 @@ TEMPLATE_FILENAME = "tedarikci-teklif-sablonu.xlsx"
 VIEW_DASHBOARD = "Dashboard"
 VIEW_COMPARISON = "Tedarikçi karşılaştırması"
 VIEW_AI = "AI analizi"
-VIEW_OPTIONS = (VIEW_DASHBOARD, VIEW_COMPARISON, VIEW_AI)
+VIEW_ROADMAP = "Product Roadmap"
+VIEW_OPTIONS = (VIEW_DASHBOARD, VIEW_COMPARISON, VIEW_AI, VIEW_ROADMAP)
 
 # --------------------------------------------------------------------------- #
 # Stil
@@ -639,6 +640,89 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   margin: 0.75rem 0 0; font-size: 0.6875rem; color: var(--muted); line-height: 1.5;
 }
 
+/* --------------------------------------------------------------- roadmap --- */
+.roadmap-track {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.roadmap-stage {
+  position: relative;
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.375rem 1.25rem 1.25rem;
+  overflow: hidden;
+}
+.roadmap-stage::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--border-strong);
+}
+.roadmap-stage.is-live::before { background: var(--lowest); }
+.roadmap-stage.is-live { border-color: var(--lowest-border); }
+.roadmap-stage.is-future {
+  background: var(--surface-muted);
+  box-shadow: none;
+}
+.roadmap-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; margin-bottom: 0.75rem;
+}
+.roadmap-phase {
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.roadmap-stage.is-live .roadmap-phase { color: var(--lowest); }
+.roadmap-status {
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.625rem; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.roadmap-status.is-live {
+  background: var(--lowest-bg); border-color: var(--lowest-border); color: var(--lowest);
+}
+.roadmap-status.is-planned {
+  background: var(--info-bg); border-color: var(--info-border); color: var(--info);
+}
+.roadmap-status.is-future { background: #ffffff; color: var(--muted); }
+.roadmap-stage h3 {
+  margin: 0 0 0.25rem; font-size: 1rem; font-weight: 600; color: var(--ink);
+  line-height: 1.35;
+}
+.roadmap-stage.is-future h3 { color: var(--ink-soft); }
+.roadmap-caption {
+  margin: 0 0 1rem; font-size: 0.75rem; color: var(--muted); line-height: 1.5;
+}
+.roadmap-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.roadmap-list li {
+  position: relative;
+  padding-left: 1.35rem;
+  font-size: 0.8125rem; color: var(--ink-soft); line-height: 1.5;
+}
+.roadmap-list li::before {
+  content: ""; position: absolute; left: 0.3rem; top: 0.45rem;
+  width: 0.375rem; height: 0.375rem; border-radius: 50%;
+  background: var(--border-strong);
+}
+.roadmap-stage.is-live .roadmap-list li::before {
+  content: "✓"; left: 0; top: -0.05rem;
+  width: auto; height: auto; border-radius: 0; background: none;
+  color: var(--lowest); font-size: 0.75rem; font-weight: 700;
+}
+.roadmap-stage.is-live .roadmap-list li { color: var(--ink); }
+.roadmap-note {
+  margin: 0.75rem 0 0; font-size: 0.6875rem; color: var(--muted); line-height: 1.5;
+}
+
 /* ------------------------------------------------------------ responsive --- */
 @media (max-width: 720px) {
   [data-testid="stAppViewContainer"] > .main .block-container,
@@ -653,6 +737,9 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   .panel-head { padding: 0.75rem 0.875rem; }
   .summary-card { padding: 1rem; }
   .summary-grid { grid-template-columns: 1fr; }
+  .roadmap-track { grid-template-columns: 1fr; gap: 0.75rem; }
+  .roadmap-stage { padding: 1.125rem 1rem 1rem; }
+  .roadmap-head { flex-wrap: wrap; }
 }
 </style>
 """
@@ -1238,6 +1325,99 @@ def _render_ai(
     )
 
 
+#: Statik ürün yol haritası içeriği. Sunum amaçlıdır; hiçbir özellik
+#: bu sabitlerden türetilmez veya çalışma zamanında değiştirilmez.
+_ROADMAP_STAGES = (
+    {
+        "phase": "V1",
+        "title": "Core Procurement Platform",
+        "status": "LIVE",
+        "tone": "live",
+        "caption": "Canlı ortamda kullanılan çekirdek tedarik platformu.",
+        "features": (
+            "Excel Supplier Quote Upload",
+            "Automated Data Validation",
+            "Procurement Cost Calculation",
+            "Supplier Comparison Dashboard",
+            "AI-Powered Procurement Analysis",
+            "Excel & PDF Reporting",
+        ),
+    },
+    {
+        "phase": "V2",
+        "title": "Procurement Intelligence",
+        "status": "PLANNED",
+        "tone": "planned",
+        "caption": "Planlanan tedarik zekâsı yetenekleri.",
+        "features": (
+            "Advanced Product Specifications",
+            "AI Price Forecasting",
+            "Logistics Optimization",
+            "Advanced Cost Analysis",
+        ),
+    },
+    {
+        "phase": "V3",
+        "title": "Enterprise Procurement",
+        "status": "FUTURE",
+        "tone": "future",
+        "caption": "Kurumsal ölçek için gelecek aşaması.",
+        "features": (
+            "Supplier Portal",
+            "ERP / SAP Integrations",
+            "Persistent Analysis History",
+            "Multi-Currency Support",
+        ),
+    },
+)
+
+
+def _render_roadmap() -> None:
+    """Statik ürün yol haritası: V1 canlıda, V2 planlı, V3 gelecek.
+
+    Görünüm yalnızca sunumdur: hiçbir özellik geliştirilmez, veri okunmaz
+    ve mevcut hesaplama/doğrulama akışına dokunulmaz.
+    """
+    st.markdown(
+        _section_head(
+            "Product Roadmap",
+            "Ürünün bugünkü kapsamı ve planlanan aşamaları. V2 ve V3 "
+            "özellikleri henüz kullanıma açık değildir.",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    stages: list[str] = []
+    for stage in _ROADMAP_STAGES:
+        tone = stage["tone"]
+        items = "".join(
+            f"<li>{html.escape(feature)}</li>" for feature in stage["features"]
+        )
+        stages.append(
+            f'<div class="roadmap-stage is-{tone}">'
+            '<div class="roadmap-head">'
+            f'<span class="roadmap-phase">{html.escape(stage["phase"])}</span>'
+            f'<span class="roadmap-status is-{tone}">'
+            f'{html.escape(stage["status"])}</span>'
+            "</div>"
+            f'<h3>{html.escape(stage["title"])}</h3>'
+            f'<p class="roadmap-caption">{html.escape(stage["caption"])}</p>'
+            f'<ul class="roadmap-list">{items}</ul>'
+            "</div>"
+        )
+
+    st.markdown(
+        f'<div class="roadmap-track">{"".join(stages)}</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<p class="roadmap-note">V1 kapsamı canlı ortamda kullanımdadır. '
+        "V2 ve V3 aşamaları planlama niteliğindedir; kapsam ve öncelik "
+        "sırası değişebilir.</p>",
+        unsafe_allow_html=True,
+    )
+
+
 def _render_reports(
     parsed: ParsedWorkbook,
     validation: ValidationResult,
@@ -1428,6 +1608,8 @@ if view == VIEW_DASHBOARD:
     _render_dashboard(parsed, validation, result, uploaded.name)
 elif view == VIEW_COMPARISON:
     _render_comparison(parsed, validation, result)
+elif view == VIEW_ROADMAP:
+    _render_roadmap()
 else:
     _render_ai(parsed, validation, result, _file_signature(uploaded))
 
