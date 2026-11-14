@@ -375,6 +375,63 @@ def test_analyze_accepts_fenced_json(tmp_path):
     assert len(analysis.sections) == 5
 
 
+@pytest.mark.parametrize(
+    "wrapper",
+    [
+        # Model JSON'dan önce/ sonra açıklama yazabilir.
+        "İşte analiz:\n{body}",
+        "{body}\nUmarım yardımcı olur.",
+        "Elbette.\n```json\n{body}\n```\nTeşekkürler.",
+        "```\n{body}\n```",
+    ],
+)
+def test_analyze_tolerates_text_around_json(tmp_path, wrapper):
+    """JSON dışı metin sarmalı ayrıştırmayı bozmamalı."""
+    parsed, validation, result = _analyse(tmp_path)
+    content = wrapper.format(body=_json_content())
+
+    analysis = analyze(
+        parsed, validation, result, client=_FakeClient(content)
+    )
+
+    assert len(analysis.sections) == 5
+
+
+def test_analyze_reports_truncated_response_clearly(tmp_path):
+    """Jeton sınırında kesilen yanıt, "geçersiz JSON" yerine açık hata verir.
+
+    Eksik bölümlü bir analiz gösterilmez: risk bölümü olmadan sunulan bir
+    yorum yanlış güven verirdi. Kullanıcıya nedeni söylenir.
+    """
+    parsed, validation, result = _analyse(tmp_path)
+    full = _json_content()
+    marker = json.dumps("recommendations", ensure_ascii=False)
+    cut = full.rfind(marker)
+    assert cut > 0
+    truncated = full[:cut].rstrip().rstrip(",")
+
+    with pytest.raises(AIAnalysisError) as error:
+        analyze(parsed, validation, result, client=_FakeClient(truncated))
+
+    assert error.value.kind == "truncated"
+    assert "yarıda kesildi" in str(error.value)
+
+
+def test_analyze_still_rejects_content_that_is_not_json(tmp_path):
+    """Tolerans, JSON olmayan yanıtı kabul etmeye dönüşmemeli."""
+    parsed, validation, result = _analyse(tmp_path)
+
+    with pytest.raises(AIAnalysisError) as error:
+        analyze(
+            parsed,
+            validation,
+            result,
+            client=_FakeClient("Bu bir JSON değil."),
+        )
+
+    assert error.value.kind == "format"
+
+
 def test_analyze_keeps_section_text_verbatim(tmp_path):
     parsed, validation, result = _analyse(tmp_path)
 

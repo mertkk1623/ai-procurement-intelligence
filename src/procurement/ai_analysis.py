@@ -607,9 +607,12 @@ maliyeti bilinmiyor demektir; bunları sıfır kabul etme ve hesaplama.
 6. Veride olmayan bilgi uydurma; bilgi yoksa açıkça "veri yok" de.
 7. `dogrulama_bulgulari` ve `karsilastirma_disi` alanlarını risk ve eksik \
 bilgi değerlendirmesinde kullan.
-8. Yalnızca şu JSON nesnesini döndür; her değer düz metin olsun (en fazla 90 \
-kelime): {"executive_summary": "", "cost_analysis": "", "delivery_payment": "", \
+8. Yanıtın **yalnızca** şu JSON nesnesi olsun; JSON dışında hiçbir açıklama, \
+başlık veya kod bloğu yazma. Her değer düz metin olsun ve 90 kelimeyi geçmesin: \
+{"executive_summary": "", "cost_analysis": "", "delivery_payment": "", \
 "risks_missing": "", "recommendations": ""}
+9. Yanıtı yarıda kesmemek için her bölümü 2-4 cümleyle sınırla; toplam yanıt \
+kısa olsun.
 
 Bölümlerin kapsamı:
 - executive_summary: genel satın alma değerlendirmesi.
@@ -1124,17 +1127,100 @@ def _section_bodies(raw: object) -> dict[str, str]:
     return bodies
 
 
+def _balanced_object(text: str) -> str | None:
+    """Metindeki ilk **dengeli** ``{...}`` bloğunu döndürür.
+
+    Metin/dize kaçışları dikkate alınır; model JSON'dan önce veya sonra
+    açıklama yazdığında asıl nesne bu sayede bulunur.
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
+def _is_truncated(text: str) -> bool:
+    """``text`` bir JSON nesnesi başlatıp kapatmadan bitiyor mu?"""
+    start = text.find("{")
+    if start < 0:
+        return False
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in text[start:]:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+    return depth > 0 or in_string
+
+
 def _parse_response(content: str) -> dict[str, str]:
-    """Yanıt metnini JSON'a çevirir; kod bloğu sarmalını tolere eder."""
-    cleaned = _FENCE.sub("", content.strip())
-    try:
-        raw = json.loads(cleaned)
-    except json.JSONDecodeError as error:
+    """Yanıt metnini JSON'a çevirir.
+
+    Sağlayıcılar biçim konusunda tutarlı değildir: nesne bir kod bloğu
+    içinde veya bir gerekçe cümlesinin ardından gelebilir. Bu sarmal
+    tolere edilir, ancak **içerik sözleşmesi katıdır**: beş bölümün tamamı
+    bulunmalıdır.
+
+    Jeton sınırında kesilen yanıt kısmi olarak gösterilmez; eksik bir
+    analiz (ör. risk bölümü olmadan) yanlış güven vereceği için açıkça
+    hata bildirilir.
+    """
+    cleaned = _FENCE.sub("", content.strip()).strip()
+
+    balanced = _balanced_object(cleaned)
+    for candidate in (cleaned, balanced):
+        if candidate is None:
+            continue
+        try:
+            raw = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        return _section_bodies(raw)
+
+    if _is_truncated(cleaned):
         raise AIAnalysisError(
-            "AI yanıtı okunamadı (geçersiz JSON). Lütfen yeniden deneyin.",
-            kind="format",
-        ) from error
-    return _section_bodies(raw)
+            "AI yanıtı yarıda kesildi; analiz eksik olduğu için "
+            "gösterilmedi. Lütfen yeniden deneyin.",
+            kind="truncated",
+        )
+
+    raise AIAnalysisError(
+        "AI yanıtı okunamadı (geçersiz JSON). Lütfen yeniden deneyin.",
+        kind="format",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1212,8 +1298,9 @@ def analyze(
             ],
             temperature=0.2,
             # Model bir "reasoning" modeli: düşünme jetonları da bu bütçeden
-            # harcanır. Küçük bir sınır içeriği boş bırakır.
-            max_tokens=4000,
+            # harcanır. Küçük bir sınır içeriği boş bırakır veya JSON'u
+            # yarıda keser; bu yüzden bütçe geniş tutulur.
+            max_tokens=8000,
         )
     except openai.APITimeoutError as error:
         raise AIAnalysisError(
