@@ -1,4 +1,4 @@
-# AI Procurement Intelligence
+﻿# AI Procurement Intelligence
 
 **English** | [Türkçe](README.tr.md)
 
@@ -237,7 +237,7 @@ ai-procurement-intelligence/
 │   ├── ai_analysis.py              # Masked request builder and AI response validation
 │   ├── report.py                   # Excel and PDF report builders
 │   └── demo_data.py                # Blank template and sample workbook generation (in memory)
-└── tests/                          # 537 tests across 9 files
+└── tests/                          # 560 tests across 9 files
 ```
 
 ### Module responsibilities
@@ -273,7 +273,7 @@ The parser raises one exception hierarchy whose messages are user-facing and fre
 | `tests/test_demo_data.py` | Blank template contract, sample workbook validity, scenario coverage, date anchoring, AI payload masking |
 | `tests/test_smoke.py` | Package import and version |
 
-Current state: **537 tests**, of which 364 are marked `unit` and 170 `integration`; three smoke tests carry no marker.
+Current state: **560 tests**, of which 387 are marked `unit` and 170 `integration`; three smoke tests carry no marker.
 
 ### Continuous integration
 

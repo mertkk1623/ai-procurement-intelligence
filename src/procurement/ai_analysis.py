@@ -666,9 +666,25 @@ _ENGLISH_MONEY = re.compile(
     r"(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*(?:TL|TRY|₺)", re.IGNORECASE
 )
 #: Sayıdan hemen önce gelen tedarikçi etiketi ("Tedarikçi 32", "T 5").
-#: Bu durumda sayı bir **değer** değil, satır numarasıdır. Kısa yol yalnızca
-#: büyük ``T`` ile yazılır; "maliyet 999" gibi sözcük sonları etiket değildir.
-_LABEL_BEFORE = re.compile(r"(?:\b[Tt]edarikçi|\bT)\s*$")
+#: Bu durumda sayı bir **değer** değil, satır numarasıdır. Etiket listeleri
+#: de kapsanır: "Tedarikçi 6/24/27/32", "Tedarikçiler 6, 24, 27 ve 32".
+#: Kısa yol yalnızca büyük ``T`` ile yazılır; "maliyet 999" gibi sözcük
+#: sonları etiket değildir.
+_LABEL_NUMBER = r"\d{1,3}"
+#: Etiket numaralarını ayıran **açık** işaretler. Düz boşluk bilinçli olarak
+#: yok: "Tedarikçi 5 194.140,00 TL" bir tutar iddiasıdır, etiket listesi değil.
+_LABEL_JOIN = r"\s*(?:[/,&;:\-(]|ve\b|ile\b)\s*"
+#: Etiketi izleyen liste; son sayıdan sonra ayırıcı kalmış olabilir
+#: ("6/24/27/" + "32").
+_LABEL_LIST = rf"{_LABEL_NUMBER}(?:{_LABEL_JOIN}{_LABEL_NUMBER})*(?:{_LABEL_JOIN})?"
+_LABEL_BEFORE = re.compile(
+    # "Tedarikçi 6/24/27/" + "32", "Tedarikçiler: 6, 24 ve " + "32"
+    rf"[Tt]edarikçi\w*\.?\s*{_LABEL_LIST}$"
+    # "Tedarikçi " + "2 TL" — iddia edilen sayı etiketin kendisidir.
+    r"|[Tt]edarikçi\w*\.?\s*$"
+    # Kısa yol: "T 5", "T 5, 6". Yalnızca büyük T; "maliyet 5 TL" etiket değil.
+    rf"|T\s*{_LABEL_LIST}$"
+)
 
 
 def _to_decimal(raw: str) -> Decimal | None:
@@ -799,6 +815,13 @@ _REQUEST_WORDS_END = re.compile(
 )
 _PAYMENT_WORDS = re.compile(r"vade|[öÖoO]deme", re.IGNORECASE)
 _DELIVERY_WORDS = re.compile(r"termin|teslim", re.IGNORECASE)
+#: Gün aralığı: "9 günden 52 güne", "9-52 gün", "9 ile 52 gün arasında".
+#: Aralık tüm teklifleri özetler; tek bir tedarikçiye atfedilemez.
+_DAY_RANGE = re.compile(
+    r"\d{1,4}\s*(?:iş\s*)?gün\w*\s*(?:ile|ila|[-–])?\s*\d{1,4}\s*(?:iş\s*)?gün"
+    r"|(?<![\d.,])\d{1,4}\s*(?:ile|ila|[-–])\s*\d{1,4}\s*(?:iş\s*)?gün",
+    re.IGNORECASE,
+)
 _LOWEST = re.compile(r"en\s+d[üu]ş[üu]k|en\s+iyi|en\s+uygun", re.IGNORECASE)
 # "en düşük değil", "en düşük olmayan" gibi olumsuz ifadeler atıf değildir.
 _NEGATED_LOWEST = re.compile(
@@ -900,6 +923,24 @@ def _inside_code(segment: str, start: int) -> bool:
     return bool(_CODE_PREFIX.search(segment[:start]))
 
 
+def _claim_in_all_delivery_days(
+    claim: Decimal, raw: str, figures: FigureSet
+) -> bool:
+    """İddia, **tüm** tekliflerin termin değerlerinden biriyle eşleşiyor mu?
+
+    Gün aralığı ifadelerinde ("9 günden 52 güne kadar") uçlar tek bir
+    tedarikçiye ait değildir; cümlede bir ad geçse bile kapsam daraltılmaz.
+    """
+    return any(
+        _claim_matches(claim, raw, supplier.delivery_days)
+        for supplier in figures.suppliers
+        if supplier.delivery_days is not None
+    ) or (
+        figures.rfq_days is not None
+        and _claim_matches(claim, raw, figures.rfq_days)
+    )
+
+
 def _check_figures(
     segment: str,
     suppliers: tuple[SupplierFigures, ...],
@@ -950,6 +991,7 @@ def _check_figures(
 
     # Gün değerleri, sayının **kendi yerel bağlamına** göre ayrılır:
     # istenen termin (RFQ) ≠ tedarikçi teslim termini ≠ ödeme vadesi.
+    range_spans = [match.span() for match in _DAY_RANGE.finditer(segment)]
     previous_end = 0
     for match in _DAYS_CLAIM.finditer(segment):
         if _inside_code(segment, match.start(1)):
@@ -957,6 +999,10 @@ def _check_figures(
         # "Tedarikçi 1 gün" ifadesindeki 1 etikettir, termin değildir.
         if _LABEL_BEFORE.search(segment[: match.start(1)]):
             continue
+        # Aralık ifadesi tüm teklifleri özetler ("9 günden 52 güne kadar").
+        # Uçlar yine doğrulanır, ancak tek bir tedarikçiye atfedilemez;
+        # bu yüzden tüm tekliflerin termin değerleri kapsam alınır.
+        in_range = any(lo <= match.start(1) < hi for lo, hi in range_spans)
         raw = match.group(1)
         claim = _to_decimal(raw)
         if claim is None:
@@ -967,10 +1013,18 @@ def _check_figures(
         # karşılaştırmayı anlatır.
         start = match.start(1)
         back = segment[max(previous_end, start - 40) : start]
-        forward = segment[match.end(1) : match.end(1) + 20]
+        forward = segment[match.end(1) : match.end(1) + 24]
         previous_end = match.end(1)
-        if _PAYMENT_WORDS.search(back) or re.match(
-            r"\s*(?:vade\w*|ödeme\w*)", forward, re.IGNORECASE
+        # Ödeme ipucu birimden **sonra** da gelebilir: "60 gün vadeli",
+        # "60 gün ödemeli". Yalnızca birim sözcüğü atlanır; başka bir
+        # ölçü ("60 gün termin") ödeme sayılmaz.
+        payment_after = re.match(
+            r"\s*(?:iş\s*)?gün\w*\s*(?:vade\w*|ödeme\w*)", forward, re.IGNORECASE
+        )
+        if (
+            _PAYMENT_WORDS.search(back)
+            or payment_after
+            or re.match(r"\s*(?:vade\w*|ödeme\w*)", forward, re.IGNORECASE)
         ):
             # Vade ile teslimat termini aynı cümlede geçebilir; ikisi de
             # kaynak sayılır, aksi hâlde doğru değer reddedilirdi.
@@ -987,6 +1041,8 @@ def _check_figures(
             if figures.rfq_days is not None:
                 day_scope += (figures.rfq_days,)
         if any(_claim_matches(claim, raw, value) for value in day_scope):
+            continue
+        if in_range and _claim_in_all_delivery_days(claim, raw, figures):
             continue
         bad[f"{raw.strip()} gün"] = None
 

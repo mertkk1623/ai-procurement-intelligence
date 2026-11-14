@@ -1035,6 +1035,12 @@ def test_unrelated_mentions_do_not_justify_weight_claims(tmp_path):
         "Tedarikçi 2 TL bazında değerlendirildi.",
         "Tedarikçi 1 gün termin veriyor.",
         "Tedarikçi 2 %50 peşin ödeme öneriyor.",
+        # Etiket listeleri: son sayı da bir değer değildir.
+        "Tedarikçi 6/24/27/32 kg/m referans dışı.",
+        "Tedarikçi 6, 24, 27 ve 32 kg/m referans dışı.",
+        "Tedarikçi 2 ve 35 ödeme koşulu belirsiz.",
+        "Tedarikçi 6/24/27/32 kg/m referans dışı, Tedarikçi 2 ve 35 "
+        "ödeme koşulu belirsiz.",
     ],
 )
 def test_supplier_label_is_not_read_as_a_value_claim(tmp_path, text):
@@ -1043,6 +1049,54 @@ def test_supplier_label_is_not_read_as_a_value_claim(tmp_path, text):
 
     assert all("atfı" not in item for item in unverified_figures(text, figures))
     assert unverified_figures(text, figures) == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Ödeme ipucu birimden sonra da gelebilir; sayı vade günüdür.
+        "Bazı teklifler 30 gün vadeli.",
+        "Tedarikçi 1 30 gün vadeli ödeme sunuyor.",
+        "Tedarikçiler 30 gün ödemeli.",
+    ],
+)
+def test_payment_cue_after_the_unit_is_recognised(tmp_path, text):
+    """``30 gün vadeli`` vade günüdür; termin sayılmamalı."""
+    figures = _figures(tmp_path)
+
+    assert unverified_figures(text, figures) == ()
+
+
+def test_payment_day_outside_the_scope_is_still_flagged(tmp_path):
+    """Vade bağlamı, olmayan bir vade gününü meşrulaştırmamalı."""
+    figures = _figures(tmp_path)
+
+    assert unverified_figures("Bazı teklifler 90 gün vadeli.", figures) == (
+        "90 gün",
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Tekliflerde 15 günden 25 güne kadar süreler verilmiştir.",
+        "Terminler 15 ile 25 gün arasında değişiyor.",
+        "İstenen termin 20 gün; tekliflerde 15 günden 25 güne ve Tedarikçi 2'de "
+        "25 güne kadar süreler verilmiştir.",
+    ],
+)
+def test_day_range_is_verified_against_all_quotes(tmp_path, text):
+    """``15 günden 25 güne`` aralığı tüm teklifleri özetler; tek ada bağlanamaz."""
+    assert unverified_figures(text, _figures(tmp_path)) == ()
+
+
+def test_day_range_with_invented_endpoint_is_still_flagged(tmp_path):
+    """Aralık kapsamı uydurma bir uç noktayı meşrulaştırmamalı."""
+    figures = _figures(tmp_path)
+
+    assert unverified_figures(
+        "Tekliflerde 15 günden 999 güne kadar süreler verilmiştir.", figures
+    ) == ("999 gün",)
 
 
 def test_word_ending_in_t_is_not_treated_as_supplier_label(tmp_path):
