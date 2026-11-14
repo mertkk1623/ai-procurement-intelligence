@@ -870,6 +870,64 @@ def test_lowest_window_ignores_thousands_separators(tmp_path):
     assert unverified_figures(text, figures) == ()
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        # "ürün maliyeti" **ürün bedeli**dir; içindeki "maliyet" kelimesi
+        # onu toplam maliyete çevirmemeli.
+        "Tedarikçi 2'nin ürün maliyeti 185.724,00 TL ile en düşük.",
+        "Tedarikçi 2 ürün maliyetinde en düşük teklifi veriyor.",
+        "Ürün maliyeti en düşük olan Tedarikçi 2, toplam tedarik "
+        "maliyetinde geride kalıyor.",
+        "Tedarikçi 2 en düşük ürün maliyetine sahip.",
+        "En düşük ürün maliyeti Tedarikçi 2'de.",
+        "Tedarikçi 2'nin ürün maliyeti en düşük olsa da toplam tedarik "
+        "maliyeti 207.345,00 TL ile Tedarikçi 1'de en düşük.",
+        # Tutar "en düşük"ten önce gelir; ölçüt yine ürün bedelidir.
+        "Tedarikçi 2, 185.724,00 TL ile en düşük ürün bedelini sunarken "
+        "toplam tedarik maliyeti 215.724,00 TL'ye çıkıyor.",
+        "Ürün bedeli 185.724,00 TL ile Tedarikçi 2'de en düşükken, toplam "
+        "tedarik maliyeti 207.345,00 TL ile Tedarikçi 1'de en düşük.",
+    ],
+)
+def test_product_cost_wording_is_not_read_as_total_cost(tmp_path, text):
+    """``ürün maliyeti`` ürün bedeli sayılmalı, toplam maliyet değil.
+
+    Regresyon: ölçüt çözümlemesi "maliyet" kelimesini "ürün"den önce
+    kontrol ediyordu; bu yüzden doğru bir ürün bedeli iddiası toplam maliyet
+    işaretiyle karşılaştırılıp reddediliyordu.
+    """
+    assert unverified_figures(text, _differing_mark_figures(tmp_path)) == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "En düşük ürün maliyeti Tedarikçi 1'de.",
+        "Tedarikçi 1 ürün maliyetinde en düşük.",
+    ],
+)
+def test_wrong_product_cost_wording_is_still_rejected(tmp_path, text):
+    """``ürün maliyeti`` yanlış tedarikçiye bağlanırsa yine reddedilir."""
+    assert unverified_figures(text, _differing_mark_figures(tmp_path)) != ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Tedarikçi 2 en düşük ürün bedelini 185.724,00 TL ile sunarken toplam "
+        "maliyeti 215.724,00 TL ile Tedarikçi 1'in tutarının üzerinde kalıyor.",
+        "Ürün bedelinde en düşük olan Tedarikçi 2'nin toplam maliyeti, en "
+        "düşük toplam maliyete sahip Tedarikçi 1'den yüksektir.",
+        "Tedarikçi 2 en düşük ürün bedeline sahip ancak toplam tedarik "
+        "maliyeti Tedarikçi 1'de en düşük.",
+    ],
+)
+def test_attribution_uses_nearest_label_to_the_phrase(tmp_path, text):
+    """Atıf, "en düşük" ifadesine en yakın ada kurulmalı; pencerenin sonuna değil."""
+    assert unverified_figures(text, _differing_mark_figures(tmp_path)) == ()
+
+
 def test_unrelated_mentions_do_not_justify_weight_claims(tmp_path):
     """Bulgu metnindeki 1/2/3 sayıları ağırlık iddiası olarak kabul edilmez."""
     figures = _figures(tmp_path)

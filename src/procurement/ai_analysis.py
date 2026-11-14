@@ -821,13 +821,16 @@ _CONTRAST_BACKWARD = re.compile(
 _CODE_PREFIX = re.compile(r"[A-Za-z]-+$")
 
 
-def _lowest_window(segment: str, start: int, end: int) -> str:
-    """``en düşük`` ifadesinin ölçütünü taşıyan dar pencereyi döndürür.
+def _lowest_window(segment: str, start: int, end: int) -> tuple[str, int]:
+    """``en düşük`` ifadesini çevreleyen dar pencereyi ve çapasını döndürür.
 
     Pencere noktalama ve karşıtlık bağlaçlarıyla kapatılır. Böylece tek
     cümlede geçen iki ayrı ölçüt ("ürün bedelinde en düşük, toplam
     maliyette ise ...") birbirine karışmaz; aksi hâlde doğru bir cümle
     yanlış atıf gerekçesiyle reddedilirdi.
+
+    İkinci öğe, "en düşük" ifadesinin pencere içindeki başlangıcıdır; ölçüt
+    bu konuma göre seçilir.
     """
     cut = 0
     for boundary in _CLAUSE_BOUNDARY.finditer(segment[:start]):
@@ -845,20 +848,40 @@ def _lowest_window(segment: str, start: int, end: int) -> str:
     contrast = _CONTRAST_FORWARD.search(tail)
     if contrast is not None and contrast.start() < forward_stop:
         forward_stop = contrast.start()
-    return segment[cut : end + forward_stop]
+    return segment[cut : end + forward_stop], start - cut
 
 
-def _lowest_metric(window: str) -> str | None:
+def _lowest_metric(window: str, anchor: int) -> str | None:
     """Penceredeki "en düşük" ifadesinin ölçütü: ``total`` veya ``product``.
+
+    ``anchor``, "en düşük" ifadesinin pencere içindeki başlangıcıdır. Ölçüt
+    **konuma göre** seçilir: önce ifadeden önceki en yakın ölçüt sözcüğü,
+    yoksa ifadeden sonraki ilk ölçüt sözcüğü. Böylece "185.724,00 TL ile en
+    düşük" gibi tutarın ifadeden önce geldiği cümlelerde de ölçüt doğru
+    okunur.
 
     Ölçüt belirsizse (ör. "en düşük birim fiyat") ``None`` döner; bu durumda
     CostMark ile karşılaştırma yapılmaz ve yanlış alarm üretilmez.
     """
-    if re.search(r"toplam|maliyet", window, re.IGNORECASE):
-        return "total"
-    if re.search(r"ür[üu]n", window, re.IGNORECASE):
-        return "product"
-    return None
+    cues: list[tuple[int, str]] = []
+    for match in re.finditer(r"ür[üu]n", window, re.IGNORECASE):
+        cues.append((match.start(), "product"))
+    for match in re.finditer(r"toplam", window, re.IGNORECASE):
+        cues.append((match.start(), "total"))
+    for match in re.finditer(r"maliyet", window, re.IGNORECASE):
+        # "ürün maliyeti" bir bütündür ve **ürün bedeli** anlamına gelir;
+        # içindeki "maliyet" onu toplam maliyete çevirmez.
+        compound = re.search(r"ür[üu]n\s+$", window[: match.start()], re.IGNORECASE)
+        cues.append((match.start(), "product" if compound else "total"))
+    if not cues:
+        return None
+
+    cues.sort()
+    before = [cue for cue in cues if cue[0] < anchor]
+    if before:
+        return before[-1][1]
+    after = [cue for cue in cues if cue[0] >= anchor]
+    return after[0][1] if after else None
 
 
 def _inside_code(segment: str, start: int) -> bool:
@@ -1001,10 +1024,10 @@ def _check_figures(
         and not _NEGATED_LOWEST.search(segment)
     ):
         for lowest in _LOWEST.finditer(segment):
-            window = _lowest_window(segment, lowest.start(), lowest.end())
+            window, anchor = _lowest_window(segment, lowest.start(), lowest.end())
             if _NEGATED_LOWEST.search(window):
                 continue
-            metric = _lowest_metric(window)
+            metric = _lowest_metric(window, anchor)
             if metric is None:
                 # Ölçüt belirsizse (ör. "en düşük birim fiyat") CostMark ile
                 # karşılaştırma yapılmaz; yanlış alarm üretmekten kaçınılır.
@@ -1025,7 +1048,7 @@ def _check_figures(
             labels = tuple(s.label for s in suppliers)
             named = sorted(
                 _segment_scope(window, labels),
-                key=lambda label: _distance(label, window, len(window)),
+                key=lambda label: _distance(label, window, anchor),
             ) or sorted(
                 _segment_scope(segment, labels),
                 key=lambda label: _distance(label, segment, lowest.start()),
