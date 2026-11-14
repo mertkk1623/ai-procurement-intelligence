@@ -665,6 +665,10 @@ _PERCENT_AFTER = re.compile(
 _ENGLISH_MONEY = re.compile(
     r"(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*(?:TL|TRY|₺)", re.IGNORECASE
 )
+#: Sayıdan hemen önce gelen tedarikçi etiketi ("Tedarikçi 32", "T 5").
+#: Bu durumda sayı bir **değer** değil, satır numarasıdır. Kısa yol yalnızca
+#: büyük ``T`` ile yazılır; "maliyet 999" gibi sözcük sonları etiket değildir.
+_LABEL_BEFORE = re.compile(r"(?:\b[Tt]edarikçi|\bT)\s*$")
 
 
 def _to_decimal(raw: str) -> Decimal | None:
@@ -919,6 +923,10 @@ def _check_figures(
             # ``W-WT-01`` gibi bulgu kodlarının parçası sayı iddiası değildir.
             if _inside_code(segment, match.start(1)):
                 continue
+            # "Tedarikçi 32 kg/m", "Tedarikçi 5 TL" gibi ifadelerdeki sayı
+            # tedarikçi **etiketidir**, iddia edilen değer değildir.
+            if _LABEL_BEFORE.search(segment[: match.start(1)]):
+                continue
             claim = _to_decimal(raw)
             if claim is None:
                 continue
@@ -945,6 +953,9 @@ def _check_figures(
     previous_end = 0
     for match in _DAYS_CLAIM.finditer(segment):
         if _inside_code(segment, match.start(1)):
+            continue
+        # "Tedarikçi 1 gün" ifadesindeki 1 etikettir, termin değildir.
+        if _LABEL_BEFORE.search(segment[: match.start(1)]):
             continue
         raw = match.group(1)
         claim = _to_decimal(raw)
@@ -980,13 +991,12 @@ def _check_figures(
         bad[f"{raw.strip()} gün"] = None
 
     percent_scope = _percent_scope(suppliers)
-    label_before = re.compile(r"(?:tedarikçi|t)\s*$", re.IGNORECASE)
     for pattern in (_PERCENT_BEFORE, _PERCENT_AFTER):
         for match in pattern.finditer(segment):
             raw = match.group(1)
             # "Tedarikçi 2 %50" ifadesindeki 2 bir yüzde değil, etiket
             # numarasıdır; aksi hâlde uydurma "%2" alarmı oluşur.
-            if label_before.search(segment[: match.start(1)]):
+            if _LABEL_BEFORE.search(segment[: match.start(1)]):
                 continue
             claim = _to_decimal(raw)
             if claim is None:

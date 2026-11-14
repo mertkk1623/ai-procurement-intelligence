@@ -1027,6 +1027,31 @@ def test_unrelated_mentions_do_not_justify_weight_claims(tmp_path):
     assert unverified_figures("Tedarikçi 2'nin ağırlığı 1 kg/m'dir.", figures) != ()
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Etiket numarası birimle bitişik gelirse değer iddiası değildir.
+        "Tedarikçi 3 kg/m değerinde referans dışı bir beyan yapmış.",
+        "Tedarikçi 2 TL bazında değerlendirildi.",
+        "Tedarikçi 1 gün termin veriyor.",
+        "Tedarikçi 2 %50 peşin ödeme öneriyor.",
+    ],
+)
+def test_supplier_label_is_not_read_as_a_value_claim(tmp_path, text):
+    """``Tedarikçi 32 kg/m`` ifadesindeki 32 etikettir; ağırlık değildir."""
+    figures = _figures(tmp_path)
+
+    assert all("atfı" not in item for item in unverified_figures(text, figures))
+    assert unverified_figures(text, figures) == ()
+
+
+def test_word_ending_in_t_is_not_treated_as_supplier_label(tmp_path):
+    """``maliyet 199.999,00 TL`` etiket değildir; uydurma sayı reddedilir."""
+    figures = _figures(tmp_path)
+
+    assert unverified_figures("Toplam maliyet 199.999,00 TL.", figures) != ()
+
+
 def test_reference_weight_range_is_accepted_only_as_weight(tmp_path):
     """Uyarıdaki referans aralık (2.27-2.51) kg/m olarak meşrudur."""
     figures = _figures(tmp_path)
