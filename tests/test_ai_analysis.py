@@ -888,6 +888,12 @@ def test_lowest_window_ignores_thousands_separators(tmp_path):
         "toplam tedarik maliyeti 215.724,00 TL'ye çıkıyor.",
         "Ürün bedeli 185.724,00 TL ile Tedarikçi 2'de en düşükken, toplam "
         "tedarik maliyeti 207.345,00 TL ile Tedarikçi 1'de en düşük.",
+        # Tamlamanın başı ifadeden hemen sonra gelir; önceki "toplam"
+        # sözcüğü ölçütü belirlememeli.
+        "Tedarikçi 2, en düşük ürün bedeli olan 185.724,00 TL ile öne "
+        "çıkıyor; toplam tedarik maliyetinde ise Tedarikçi 1 en düşük.",
+        "Ürün bedelinde en düşük teklif Tedarikçi 2'de, toplam tedarik "
+        "maliyetinde en düşük teklif Tedarikçi 1'de.",
     ],
 )
 def test_product_cost_wording_is_not_read_as_total_cost(tmp_path, text):

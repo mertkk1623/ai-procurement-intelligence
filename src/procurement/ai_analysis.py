@@ -851,14 +851,14 @@ def _lowest_window(segment: str, start: int, end: int) -> tuple[str, int]:
     return segment[cut : end + forward_stop], start - cut
 
 
-def _lowest_metric(window: str, anchor: int) -> str | None:
+def _lowest_metric(window: str, anchor: int, phrase_end: int) -> str | None:
     """Penceredeki "en düşük" ifadesinin ölçütü: ``total`` veya ``product``.
 
-    ``anchor``, "en düşük" ifadesinin pencere içindeki başlangıcıdır. Ölçüt
-    **konuma göre** seçilir: önce ifadeden önceki en yakın ölçüt sözcüğü,
-    yoksa ifadeden sonraki ilk ölçüt sözcüğü. Böylece "185.724,00 TL ile en
-    düşük" gibi tutarın ifadeden önce geldiği cümlelerde de ölçüt doğru
-    okunur.
+    ``anchor``–``phrase_end`` aralığı "en düşük" ifadesinin kendisidir.
+    Türkçede ölçüt çoğunlukla tamlamanın başı olarak ifadeden **hemen
+    sonra** gelir ("en düşük ürün bedeli"); bu durumda o sözcük kazanır.
+    Aksi hâlde ifadeden önceki en yakın ölçüt sözcüğü, o da yoksa sonraki
+    ilk ölçüt sözcüğü kullanılır.
 
     Ölçüt belirsizse (ör. "en düşük birim fiyat") ``None`` döner; bu durumda
     CostMark ile karşılaştırma yapılmaz ve yanlış alarm üretilmez.
@@ -877,11 +877,15 @@ def _lowest_metric(window: str, anchor: int) -> str | None:
         return None
 
     cues.sort()
+    following = [cue for cue in cues if cue[0] >= phrase_end]
+    # Tamlamanın başı: "en düşük ürün bedeli" / "en düşük toplam maliyet".
+    if following and not window[phrase_end : following[0][0]].strip():
+        return following[0][1]
+
     before = [cue for cue in cues if cue[0] < anchor]
     if before:
         return before[-1][1]
-    after = [cue for cue in cues if cue[0] >= anchor]
-    return after[0][1] if after else None
+    return following[0][1] if following else None
 
 
 def _inside_code(segment: str, start: int) -> bool:
@@ -1027,7 +1031,7 @@ def _check_figures(
             window, anchor = _lowest_window(segment, lowest.start(), lowest.end())
             if _NEGATED_LOWEST.search(window):
                 continue
-            metric = _lowest_metric(window, anchor)
+            metric = _lowest_metric(window, anchor, anchor + (lowest.end() - lowest.start()))
             if metric is None:
                 # Ölçüt belirsizse (ör. "en düşük birim fiyat") CostMark ile
                 # karşılaştırma yapılmaz; yanlış alarm üretmekten kaçınılır.
