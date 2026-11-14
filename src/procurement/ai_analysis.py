@@ -800,8 +800,65 @@ _NEGATED_LOWEST = re.compile(
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?;])\s+|\n+")
+#: Yan cümle sınırları. Binlik/ondalık ayıracı olan virgül ve nokta
+#: (``187.074,00``) sınır sayılmaz; aksi hâlde tutarın ortasından kesilirdi.
+_CLAUSE_BOUNDARY = re.compile(r"[;!?\n]|(?<!\d)[.,]|[.,](?!\d)")
+#: Karşıtlık bağlaçları "en düşük" penceresini kapatır: "ürün bedelinde en
+#: düşük olsa da toplam maliyeti yüksek" cümlesinde "toplam" ikinci yarıya
+#: aittir ve ilk "en düşük" ifadesinin ölçütü değildir.
+#: Türkçe ``İ`` harf duyarsız eşleşmeye girmediği için açıkça yazılır.
+_CONTRAST_FORWARD = re.compile(
+    r"\b(?:ancak|fakat|ama|lakin|[iİ]se|olsa\s+da|olmasına\s+karşın|"
+    r"karşın|rağmen|oysa|halbuki)\b"
+)
+#: Geriye dönük karşıtlık: "toplam maliyet yüksek ancak ürün bedelinde en
+#: düşük". Yalnızca pencereyi **açar**; "ise" geriye dönük kullanılmaz.
+_CONTRAST_BACKWARD = re.compile(
+    r"\b(?:ancak|fakat|ama|lakin|olsa\s+da|olmasına\s+karşın|karşın|rağmen|"
+    r"oysa|halbuki)\b"
+)
 # ``W-WT-01`` gibi bulgu kodlarının sonundaki sayı iddia değildir.
 _CODE_PREFIX = re.compile(r"[A-Za-z]-+$")
+
+
+def _lowest_window(segment: str, start: int, end: int) -> str:
+    """``en düşük`` ifadesinin ölçütünü taşıyan dar pencereyi döndürür.
+
+    Pencere noktalama ve karşıtlık bağlaçlarıyla kapatılır. Böylece tek
+    cümlede geçen iki ayrı ölçüt ("ürün bedelinde en düşük, toplam
+    maliyette ise ...") birbirine karışmaz; aksi hâlde doğru bir cümle
+    yanlış atıf gerekçesiyle reddedilirdi.
+    """
+    cut = 0
+    for boundary in _CLAUSE_BOUNDARY.finditer(segment[:start]):
+        cut = boundary.end()
+
+    # Son karşıtlık bağlacından sonrası pencereye dâhildir.
+    for contrast in _CONTRAST_BACKWARD.finditer(segment[cut:start]):
+        cut += contrast.end()
+
+    tail = segment[end:]
+    forward_stop = len(tail)
+    boundary = _CLAUSE_BOUNDARY.search(tail)
+    if boundary is not None:
+        forward_stop = boundary.start()
+    contrast = _CONTRAST_FORWARD.search(tail)
+    if contrast is not None and contrast.start() < forward_stop:
+        forward_stop = contrast.start()
+    return segment[cut : end + forward_stop]
+
+
+def _lowest_metric(window: str) -> str | None:
+    """Penceredeki "en düşük" ifadesinin ölçütü: ``total`` veya ``product``.
+
+    Ölçüt belirsizse (ör. "en düşük birim fiyat") ``None`` döner; bu durumda
+    CostMark ile karşılaştırma yapılmaz ve yanlış alarm üretilmez.
+    """
+    if re.search(r"toplam|maliyet", window, re.IGNORECASE):
+        return "total"
+    if re.search(r"ür[üu]n", window, re.IGNORECASE):
+        return "product"
+    return None
 
 
 def _inside_code(segment: str, start: int) -> bool:
@@ -934,32 +991,48 @@ def _check_figures(
             notes["nakliyesi eksik tedarikçi için hesaplanmış toplam"] = None
 
     # R1/R4: "en düşük" atfı CostMark etiketleriyle doğrulanır.
-    lowest = _LOWEST.search(segment)
+    # Her "en düşük" geçişi **kendi penceresinde** değerlendirilir: tek bir
+    # cümlede iki farklı ölçüt geçebilir ("ürün bedelinde en düşük, toplam
+    # maliyette ise ..."). Cümle bütününe bakmak, ikinci ölçütü birinci
+    # ifadeye uygulayıp doğru cümleyi reddederdi.
     if (
         attributed
-        and lowest
-        and not _NEGATED_LOWEST.search(segment)
-        # Nakliye karşılaştırması ("nakliye ... en düşük") bir CostMark
-        # metriği değildir; en düşük nakliye işareti yoktur.
         and "nakliye" not in segment.casefold()
+        and not _NEGATED_LOWEST.search(segment)
     ):
-        if re.search(r"toplam|maliyet", segment, re.IGNORECASE):
-            allowed = figures.lowest_total_labels
-        elif re.search(r"ür[üu]n", segment, re.IGNORECASE):
-            allowed = figures.lowest_product_labels
-        else:
-            # Ölçüt belirsizse (ör. "en düşük birim fiyat") CostMark ile
-            # karşılaştırma yapılmaz; yanlış alarm üretmekten kaçınılır.
-            allowed = None
-        if allowed:
+        for lowest in _LOWEST.finditer(segment):
+            window = _lowest_window(segment, lowest.start(), lowest.end())
+            if _NEGATED_LOWEST.search(window):
+                continue
+            metric = _lowest_metric(window)
+            if metric is None:
+                # Ölçüt belirsizse (ör. "en düşük birim fiyat") CostMark ile
+                # karşılaştırma yapılmaz; yanlış alarm üretmekten kaçınılır.
+                continue
+            allowed = (
+                figures.lowest_total_labels
+                if metric == "total"
+                else figures.lowest_product_labels
+            )
+            if not allowed:
+                continue
             # Atıf, "en düşük" ifadesine **en yakın** tedarikçiye kurulur;
             # aksi hâlde bir liste cümlesindeki tüm etiketler alarm verirdi.
+            # Önce pencerede aranır: aynı cümlede iki ölçüt geçtiğinde
+            # ("ürün bedelinde en düşük ... toplam maliyette en düşük") atıf
+            # kendi yan cümlesindeki ada bağlanır. Pencere içinde ad yoksa
+            # cümle bütününe düşülür.
+            labels = tuple(s.label for s in suppliers)
             named = sorted(
-                _segment_scope(segment, tuple(s.label for s in suppliers)),
+                _segment_scope(window, labels),
+                key=lambda label: _distance(label, window, len(window)),
+            ) or sorted(
+                _segment_scope(segment, labels),
                 key=lambda label: _distance(label, segment, lowest.start()),
             )
             if named and named[0] not in allowed:
                 notes[f"en düşük atfı: {named[0]}"] = None
+                break
 
     return tuple(bad), tuple(notes)
 

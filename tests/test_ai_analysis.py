@@ -765,6 +765,111 @@ def test_lowest_wording_does_not_flag_unrelated_suppliers(tmp_path, text):
     assert unverified_figures(text, _figures(tmp_path)) == ()
 
 
+# --------------------------------------------------------------------------- #
+# İki farklı "en düşük" ölçütü aynı cümlede
+# --------------------------------------------------------------------------- #
+
+#: En düşük ürün bedeli ile en düşük toplam maliyetin **ayrı** tedarikçilere
+#: düştüğü veri. Demo veri seti de bu durumu kasıtlı olarak üretir; burada
+#: aynı senaryo küçük bir çalışma kitabıyla kurulur.
+#: Tedarikçi 2 ürün bedelinde en düşük (26,80 TL/kg), ancak yüksek nakliyesi
+#: toplam maliyeti yükseltir; toplamda Tedarikçi 1 öndedir.
+#:
+#: Miktar 500 adet × 6 m olduğu için toplam ağırlık kg/m × 3.000'dir:
+#: T1 2,39 → 7.170 kg, T2 2,31 → 6.930 kg, T3 2,58 → 7.740 kg.
+_DIFFERING_MARKS = (
+    # Tedarikçi 1 (satır 3): orta fiyat, düşük nakliye → en düşük toplam.
+    (("Supplier Quotes", "F3"), 2.39),
+    (("Supplier Quotes", "G3"), 28.50),
+    (("Supplier Quotes", "H3"), 3_000),
+    # Tedarikçi 2 (satır 4): en düşük birim fiyat, çok yüksek nakliye.
+    (("Supplier Quotes", "F4"), 2.31),
+    (("Supplier Quotes", "G4"), 26.80),
+    (("Supplier Quotes", "H4"), 30_000),
+    # Tedarikçi 3 (satır 5): her iki kalemde de yüksek.
+    (("Supplier Quotes", "F5"), 2.58),
+    (("Supplier Quotes", "G5"), 29.90),
+    (("Supplier Quotes", "H5"), 9_100),
+)
+
+
+def _differing_mark_figures(tmp_path):
+    """En düşük ürün bedeli ≠ en düşük toplam maliyet olan küçük veri kümesi."""
+    def mutate(workbook):
+        for (sheet, cell), value in _DIFFERING_MARKS:
+            workbook[sheet][cell] = value
+
+    figures = _figures(tmp_path, mutate)
+    # Kurulum gerçekten iki ayrı işaret üretmeli; aksi hâlde test konusunu
+    # kaybeder ve sessizce geçerdi.
+    assert figures.lowest_product_labels == ("Tedarikçi 2",)
+    assert figures.lowest_total_labels == ("Tedarikçi 1",)
+    assert figures.lowest_product_amount == Decimal("185724.00")
+    assert figures.lowest_total_amount == Decimal("207345.00")
+    return figures
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Aynı cümlede iki ölçüt: ilki ürün bedeli, ikincisi toplam maliyet.
+        "Tedarikçi 2 ürün bedelinde en düşük, toplam tedarik maliyetinde ise "
+        "Tedarikçi 1 en düşük.",
+        "Tedarikçi 2 ürün bedelinde en düşük olsa da toplam tedarik maliyeti "
+        "daha yüksek; bu kalemde Tedarikçi 1 önde.",
+        "En düşük ürün bedeli Tedarikçi 2'de, en düşük toplam tedarik maliyeti "
+        "Tedarikçi 1'de.",
+        "En düşük ürün bedeli Tedarikçi 2'de olmasına karşın, toplam tedarik "
+        "maliyetinde Tedarikçi 1 en düşüktür.",
+        "Tedarikçi 2 en düşük birim fiyata yakın, ancak toplam maliyette "
+        "Tedarikçi 1 önde.",
+        "Ürün bedelinde en düşük Tedarikçi 2; toplam maliyette en düşük "
+        "Tedarikçi 1.",
+    ],
+)
+def test_two_lowest_metrics_in_one_sentence_are_both_verified(tmp_path, text):
+    """Doğru cümle, iki işaret farklı tedarikçide diye reddedilmemeli.
+
+    Regresyon: doğrulama "en düşük" ölçütünü cümle bütününden okuyordu ve
+    ikinci ölçütü ("toplam maliyet") ilk ifadeye uyguluyordu. Demo veri
+    setinde en düşük ürün bedeli ile en düşük toplam maliyet bilinçli olarak
+    ayrı satırlara düştüğü için modelin doğru cevabı reddediliyordu.
+    """
+    assert unverified_figures(text, _differing_mark_figures(tmp_path)) == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "En düşük ürün bedeli Tedarikçi 1'de.",
+        "En düşük toplam tedarik maliyeti Tedarikçi 2'de.",
+        "Tedarikçi 1 ürün bedelinde en düşük.",
+        "Tedarikçi 2 toplam tedarik maliyetinde en düşük.",
+        # İki ölçüt de yanlış tedarikçiye bağlanmış.
+        "En düşük ürün bedeli Tedarikçi 1'de, en düşük toplam maliyet "
+        "Tedarikçi 2'de.",
+    ],
+)
+def test_wrong_lowest_attribution_is_still_rejected_when_marks_differ(
+    tmp_path, text
+):
+    """Pencere daraltması gerçek yanlış atıfları gevşetmemeli."""
+    assert unverified_figures(text, _differing_mark_figures(tmp_path)) != ()
+
+
+def test_lowest_window_ignores_thousands_separators(tmp_path):
+    """Tutar içindeki ``185.724,00`` virgülü/noktası yan cümle sınırı değildir."""
+    figures = _differing_mark_figures(tmp_path)
+
+    # Tutarın kendi virgülü yan cümleyi kesmemeli: aksi hâlde "toplam"
+    # kelimesi pencereye girmez ve ölçüt yanlış okunurdu.
+    text = (
+        "En düşük ürün bedeli 185.724,00 TL ile Tedarikçi 2'de, "
+        "en düşük toplam tedarik maliyeti 207.345,00 TL ile Tedarikçi 1'de."
+    )
+    assert unverified_figures(text, figures) == ()
+
+
 def test_unrelated_mentions_do_not_justify_weight_claims(tmp_path):
     """Bulgu metnindeki 1/2/3 sayıları ağırlık iddiası olarak kabul edilmez."""
     figures = _figures(tmp_path)
