@@ -795,8 +795,8 @@ _DELIVERY_WORDS = re.compile(r"termin|teslim", re.IGNORECASE)
 _LOWEST = re.compile(r"en\s+d[üu]ş[üu]k|en\s+iyi|en\s+uygun", re.IGNORECASE)
 # "en düşük değil", "en düşük olmayan" gibi olumsuz ifadeler atıf değildir.
 _NEGATED_LOWEST = re.compile(
-    r"en\s+d[üu]ş[üu]k\w*\s*[^.;]{0,30}?değil"
-    r"|(?:değil|olmayan)\w*\s*[^.;]{0,20}en\s+d[üu]ş[üu]k",
+    r"en\s+d[üu]ş[üu]k\w*\s*[^.;]{0,40}?(?:değil|olmamak|olmadığ|olmaksızın)"
+    r"|(?:değil|olmayan|olmadığ)\w*\s*[^.;]{0,20}en\s+d[üu]ş[üu]k",
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?;])\s+|\n+")
@@ -1043,23 +1043,26 @@ def _check_figures(
             )
             if not allowed:
                 continue
-            # Atıf, "en düşük" ifadesine **en yakın** tedarikçiye kurulur;
-            # aksi hâlde bir liste cümlesindeki tüm etiketler alarm verirdi.
-            # Önce pencerede aranır: aynı cümlede iki ölçüt geçtiğinde
-            # ("ürün bedelinde en düşük ... toplam maliyette en düşük") atıf
-            # kendi yan cümlesindeki ada bağlanır. Pencere içinde ad yoksa
-            # cümle bütününe düşülür.
+            # Atıf denetimi: iddianın geçtiği yan cümlede **hiçbir** adı
+            # geçen tedarikçi o işareti taşımıyorsa iddia yanlıştır. Hangi
+            # ada atıf yapıldığını mesafeyle tahmin etmek kırılgandı
+            # ("Tedarikçi 5'e kıyasla en düşük", "Tedarikçi 5'inkinden en
+            # düşük" gibi karşılaştırmalarda yanlış ada bağlanıyordu).
+            # Ölçüt belirsizken yanlış alarm üretilmemesi ilkesi burada da
+            # geçerlidir: adaylardan biri işareti taşıyorsa atıf kesin
+            # değildir, alarm verilmez.
             labels = tuple(s.label for s in suppliers)
-            named = sorted(
-                _segment_scope(window, labels),
-                key=lambda label: _distance(label, window, anchor),
-            ) or sorted(
-                _segment_scope(segment, labels),
-                key=lambda label: _distance(label, segment, lowest.start()),
+            candidates = _segment_scope(window, labels) or _segment_scope(
+                segment, labels
             )
-            if named and named[0] not in allowed:
-                notes[f"en düşük atfı: {named[0]}"] = None
-                break
+            if candidates and not set(candidates) & set(allowed):
+                # Notta, ifadeye en yakın ad gösterilir.
+                nearest = min(
+                    candidates,
+                    key=lambda label: _distance(label, window, anchor),
+                )
+                notes[f"en düşük atfı: {nearest}"] = None
+                continue
 
     return tuple(bad), tuple(notes)
 

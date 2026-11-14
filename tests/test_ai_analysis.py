@@ -934,6 +934,34 @@ def test_attribution_uses_nearest_label_to_the_phrase(tmp_path, text):
     assert unverified_figures(text, _differing_mark_figures(tmp_path)) == ()
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Karşılaştırma tabanı ("kıyasla", "göre", "-inkinden") adı geçen
+        # **diğer** tedarikçidir; iddia ona ait değildir.
+        "Tedarikçi 2 ürün bedelinde Tedarikçi 1'e kıyasla en düşük.",
+        "Tedarikçi 2'nin ürün bedeli Tedarikçi 1'inkinden en düşük.",
+        "Tedarikçi 2 ürün bedelinde, Tedarikçi 1'e göre en düşük.",
+        # Olumsuz ifade iddia değildir.
+        "Tedarikçi 2 ürün bedelinde en düşük olmamakla birlikte toplamda "
+        "da geride.",
+        "Tedarikçi 2 ürün bedelinde en düşük değil.",
+    ],
+)
+def test_comparative_baseline_is_not_flagged(tmp_path, text):
+    """Karşılaştırma tabanı veya olumsuzlama yanlış atıf alarmı üretmemeli."""
+    assert unverified_figures(text, _differing_mark_figures(tmp_path)) == ()
+
+
+def test_clause_naming_only_wrong_suppliers_is_still_flagged(tmp_path):
+    """Yan cümlede geçen adların **hiçbiri** işareti taşımıyorsa alarm verilir."""
+    figures = _differing_mark_figures(tmp_path)
+
+    assert unverified_figures(
+        "Tedarikçi 1 ürün bedelinde en düşük.", figures
+    ) != ()
+
+
 def test_unrelated_mentions_do_not_justify_weight_claims(tmp_path):
     """Bulgu metnindeki 1/2/3 sayıları ağırlık iddiası olarak kabul edilmez."""
     figures = _figures(tmp_path)
