@@ -596,7 +596,7 @@ Kesin kurallar:
 1. Yalnızca verilen JSON içindeki sayıları kullan. Yeni fiyat, ağırlık, \
 termin, tutar veya oran üretme.
 2. Aritmetik yapma. Fark, yüzde, ortalama, toplam ya da birim maliyet \
-hesaplama; karşılaştırmayı "daha yüksek", "daha düşük", "yakın" gibi nitel \
+hesaplama; karşılaştırmayı "daha yüksek", "daha düşük" gibi nitel \
 ifadelerle yap.
 3. Tutarları, oranları ve ağırlıkları verilen biçimde aynen yaz \
 (örnek: 204.345,00 TL, 28,50 TL/kg, 2,390 kg/m, 15 gün).
@@ -613,6 +613,22 @@ başlık veya kod bloğu yazma. Her değer düz metin olsun ve 90 kelimeyi geçm
 "risks_missing": "", "recommendations": ""}
 9. Yanıtı yarıda kesmemek için her bölümü 2-4 cümleyle sınırla; toplam yanıt \
 kısa olsun.
+
+**Sayı yazma kuralları (doğrulama bunlara göre yapılır):**
+10. Bir sayıyı yalnızca ölçüsüyle birlikte yaz ve ölçü sözcüğünü sayıdan \
+sonra getir: "194.140,00 TL", "28,50 TL/kg", "2,390 kg/m", "7.170,000 kg", \
+"15 gün", "%50". Sayıyı asla tedarikçi etiketine bitişik yazma.
+11. Tedarikçi etiketleri ("Tedarikçi 5", "T5") bir ölçü birimiyle \
+birleşmemeli: "Tedarikçi 6, 24, 27 ve 32'de kg/m sapması var" yaz; \
+"Tedarikçi 6, 24, 27 ve 32 kg/m" yazma.
+12. Aralık yazarken iki ucu da ölçüsüyle yaz: "9 gün ile 420 gün arasında". \
+"9-420 gün" gibi kısa yazımdan kaçın.
+13. Veride olmayan bir eşik veya karşılaştırma tabanı uydurma: \
+"420 gün, 365 günün üzerinde" yazma; onun yerine "420 gün, istenen 20 günün \
+çok üzerinde" yaz.
+14. "En düşük" ifadesini yalnızca JSON'daki `en_dusuk` alanındaki tutarla ve \
+o alandaki tedarikçi etiketiyle birlikte kullan. "En düşüğe yakın", \
+"en düşük seviyesinde" gibi yaklaşıklık nitelemeleri kullanma.
 
 Bölümlerin kapsamı:
 - executive_summary: genel satın alma değerlendirmesi.
@@ -677,13 +693,20 @@ _LABEL_JOIN = r"\s*(?:[/,&;:\-(]|ve\b|ile\b)\s*"
 #: Etiketi izleyen liste; son sayıdan sonra ayırıcı kalmış olabilir
 #: ("6/24/27/" + "32").
 _LABEL_LIST = rf"{_LABEL_NUMBER}(?:{_LABEL_JOIN}{_LABEL_NUMBER})*(?:{_LABEL_JOIN})?"
+#: Kısa yazım listesi: "T6/T24/T27/T32", "T6, T24 ve T32". Liste bir sonraki
+#: ``T`` harfinin başında kesilebilir ("T6/T24/T27/T" + "32").
+_T_LIST = (
+    rf"T\s*{_LABEL_NUMBER}(?:{_LABEL_JOIN}T?\s*{_LABEL_NUMBER})*"
+    rf"(?:{_LABEL_JOIN}T?)?"
+)
 _LABEL_BEFORE = re.compile(
     # "Tedarikçi 6/24/27/" + "32", "Tedarikçiler: 6, 24 ve " + "32"
-    rf"[Tt]edarikçi\w*\.?\s*{_LABEL_LIST}$"
+    rf"[Tt]edarikçi\w*\.?\s*T?{_LABEL_LIST}$"
     # "Tedarikçi " + "2 TL" — iddia edilen sayı etiketin kendisidir.
     r"|[Tt]edarikçi\w*\.?\s*$"
-    # Kısa yol: "T 5", "T 5, 6". Yalnızca büyük T; "maliyet 5 TL" etiket değil.
-    rf"|T\s*{_LABEL_LIST}$"
+    # Kısa yol: "T 5", "T 5, 6", "T6/T24/T27/" + "32". Yalnızca büyük T;
+    # "maliyet 5 TL" etiket değildir.
+    rf"|{_T_LIST}$"
 )
 
 
@@ -827,6 +850,13 @@ _LOWEST = re.compile(r"en\s+d[üu]ş[üu]k|en\s+iyi|en\s+uygun", re.IGNORECASE)
 _NEGATED_LOWEST = re.compile(
     r"en\s+d[üu]ş[üu]k\w*\s*[^.;]{0,40}?(?:değil|olmamak|olmadığ|olmaksızın)"
     r"|(?:değil|olmayan|olmadığ)\w*\s*[^.;]{0,20}en\s+d[üu]ş[üu]k",
+    re.IGNORECASE,
+)
+#: "En düşük toplam maliyete yakın" bir sıralama iddiası değil, yakınlık
+#: nitelemesidir; CostMark ile doğrulanamaz.
+_APPROXIMATE_LOWEST = re.compile(
+    r"en\s+d[üu]ş[üu]k\w*\s*[^.;]{0,40}?"
+    r"(?:yakın|yaklaşık|benzer|denk|paralel|seviyesinde|düzeyinde)",
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?;])\s+|\n+")
@@ -1100,6 +1130,9 @@ def _check_figures(
             window, anchor = _lowest_window(segment, lowest.start(), lowest.end())
             if _NEGATED_LOWEST.search(window):
                 continue
+            if _APPROXIMATE_LOWEST.search(window):
+                # "en düşük toplam maliyete yakın" sıralama iddiası değil.
+                continue
             metric = _lowest_metric(window, anchor, anchor + (lowest.end() - lowest.start()))
             if metric is None:
                 # Ölçüt belirsizse (ör. "en düşük birim fiyat") CostMark ile
@@ -1289,6 +1322,62 @@ def _parse_response(content: str) -> dict[str, str]:
     )
 
 
+def _repair_attempt(
+    client: Any,
+    request: Any,
+    previous: dict[str, str],
+    unverified: tuple[str, ...],
+    check: Any,
+) -> dict[str, str] | None:
+    """Doğrulanamayan yanıt için tek seferlik düzeltme turu.
+
+    Modele **hangi ifadelerin** kaynakla eşleşmediği söylenir; sayıyı
+    değiştirmesi değil, verilen biçimde yeniden yazması istenir. Tur
+    başarısız olursa ``None`` döner ve çağıran taraf hatayı bildirir —
+    böylece katı doğrulama korunur, sadece geçici bir şans tanınır.
+    """
+    listing = "\n".join(f"- {item}" for item in unverified[:12])
+    instruction = (
+        "Önceki yanıtında kaynak JSON ile eşleşmeyen şu ifadeler var:\n"
+        f"{listing}\n\n"
+        "Yanıtı yeniden yaz. Yalnızca yukarıdaki verilerden gelen sayıları "
+        "kullan; bu ifadeleri tamamen çıkar veya kaynaktaki değerle değiştir. "
+        "Aynı beş bölümü, aynı JSON biçiminde döndür."
+    )
+    try:
+        response = client.chat.completions.create(
+            model=_model_name(),
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        request.payload, ensure_ascii=False, indent=2
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": json.dumps(previous, ensure_ascii=False),
+                },
+                {"role": "user", "content": instruction},
+            ],
+            temperature=0.1,
+            max_tokens=8000,
+        )
+    except Exception:  # noqa: BLE001 - düzeltme turu isteğe bağlıdır
+        return None
+
+    try:
+        bodies = _parse_response(_content_of(response))
+    except AIAnalysisError:
+        return None
+
+    text = "\n".join(bodies[key] for key, _title in SECTION_TITLES)
+    if check(text, request.figures):
+        return None
+    return bodies
+
+
 # --------------------------------------------------------------------------- #
 # Analiz
 # --------------------------------------------------------------------------- #
@@ -1407,6 +1496,19 @@ def analyze(
 
     text = "\n".join(bodies[key] for key, _title in SECTION_TITLES)
     unverified = unverified_figures(text, request.figures)
+    if unverified:
+        # Tek turda kusursuz metin beklemek kırılgandır: model doğru veriyi
+        # farklı bir kalıpla yazabiliyor ve katı doğrulama bunu reddediyor.
+        # Bir kez, **somut geri bildirimle** yeniden denenir. İkinci tur da
+        # doğrulanamazsa analiz gösterilmez; katılık korunur.
+        retry = _repair_attempt(
+            client, request, bodies, unverified, unverified_figures
+        )
+        if retry is not None:
+            bodies = retry
+            text = "\n".join(bodies[key] for key, _title in SECTION_TITLES)
+            unverified = unverified_figures(text, request.figures)
+
     if unverified:
         raise AIAnalysisError(
             "AI yanıtında kaynak verilerle eşleşmeyen sayısal ifadeler var; "

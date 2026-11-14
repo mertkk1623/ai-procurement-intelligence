@@ -121,6 +121,23 @@ class _FakeClient:
         )
 
 
+class _SequenceClient(_FakeClient):
+    """Sırayla farklı içerik döndüren istemci (düzeltme turu testleri)."""
+
+    def __init__(self, contents: list[str]):
+        super().__init__(contents[0] if contents else None)
+        self.contents = contents
+
+    def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        content = self.contents[min(len(self.calls) - 1, len(self.contents) - 1)]
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content=content))
+            ]
+        )
+
+
 def _json_content(**overrides: str) -> str:
     body = dict(BODIES)
     body.update(overrides)
@@ -1180,6 +1197,46 @@ def test_contradicting_answer_with_missing_shipping_is_not_shown(tmp_path):
 def test_correct_value_in_short_format_is_accepted(tmp_path, text):
     """Doğru değerin kuruşsuz/makul yuvarlanmış yazımı reddedilmez."""
     assert unverified_figures(text, _figures(tmp_path)) == ()
+
+
+def test_repair_round_rescues_a_recoverable_answer(tmp_path):
+    """Doğrulama reddederse model bir kez düzeltme şansı alır.
+
+    İlk yanıt uydurma bir tutar içeriyor; düzeltme turu geçerli metni
+    döndürdüğünde analiz gösterilir.
+    """
+    parsed, validation, result = _analyse(tmp_path)
+    bad = _json_content(cost_analysis="En düşük toplam maliyet 199.999,00 TL.")
+
+    client = _SequenceClient([bad, _json_content()])
+    analysis = analyze(parsed, validation, result, client=client)
+
+    assert len(analysis.sections) == 5
+    assert analysis.sections[1].body == BODIES["cost_analysis"]
+    assert len(client.calls) == 2
+
+
+def test_repair_round_failure_still_reports_unverified(tmp_path):
+    """Düzeltme turu da başarısız olursa analiz yine gösterilmez."""
+    parsed, validation, result = _analyse(tmp_path)
+    bad = _json_content(cost_analysis="En düşük toplam maliyet 199.999,00 TL.")
+
+    client = _SequenceClient([bad, bad])
+    with pytest.raises(AIAnalysisError) as caught:
+        analyze(parsed, validation, result, client=client)
+
+    assert caught.value.kind == "unverified"
+    assert len(client.calls) == 2
+
+
+def test_repair_round_is_not_attempted_for_a_valid_answer(tmp_path):
+    """Geçerli yanıt için gereksiz ikinci istek yapılmaz."""
+    parsed, validation, result = _analyse(tmp_path)
+    client = _SequenceClient([_json_content()])
+
+    analyze(parsed, validation, result, client=client)
+
+    assert len(client.calls) == 1
 
 
 @pytest.mark.parametrize(

@@ -75,6 +75,7 @@ Yapay zekâ analizi bir karar katmanı değil, açıklama katmanıdır:
 - Tedarikçi sıralaması üretmez, kazanan teklifi seçmez.
 - Ham Excel dosyasını, notlar sütununu, teklif numaralarını veya gerçek tedarikçi adlarını hiçbir zaman almaz. Ödeme koşulları girildiği biçimde iletilir; bu nedenle o hücreye tanımlayıcı yazılmamalıdır (bkz. [Mevcut Sınırlamalar](#mevcut-sınırlamalar)).
 - Yanıtında doğrulanmış kaynak sayılarla eşleşmeyen bir sayı bulunursa analiz reddedilir ve gösterilmez.
+- Reddedilen yanıt için modele **bir kez** düzeltme şansı verilir: hangi ifadelerin eşleşmediği söylenir ve doğrulanmış biçimde yeniden yazması istenir. İkinci deneme de başarısız olursa analiz gösterilmez. Katılık değişmez; yalnızca tek bir kurtarılabilir deneme eklenir.
 - "En düşük" iddiaları yan cümle bazında doğrulanır. Tek cümlede iki ölçüt geçebilir ("ürün bedelinde en düşük, toplam maliyette ise …"); her iddia kendi yan cümlesindeki ölçütle karşılaştırılır. "Ürün maliyeti" ürün bedeli sayılır, toplam maliyet değil. Bir iddia yalnızca yan cümlesinde adı geçen tedarikçilerin **hiçbiri** o işareti taşımıyorsa reddedilir; atıf belirsizse sessiz kalınır.
 
 ---
@@ -237,7 +238,7 @@ ai-procurement-intelligence/
 │   ├── ai_analysis.py              # Maskelenmiş istek üretimi ve AI yanıt doğrulaması
 │   ├── report.py                   # Excel ve PDF rapor üreticileri
 │   └── demo_data.py                # Boş şablon ve örnek çalışma kitabı üretimi (bellekte)
-└── tests/                          # 9 dosyada 560 test
+└── tests/                          # 9 dosyada 563 test
 ```
 
 ### Modül sorumlulukları
@@ -273,7 +274,7 @@ Ayrıştırıcı, mesajları kullanıcıya dönük ve dosya sistemi yollarından
 | `tests/test_demo_data.py` | Boş şablon sözleşmesi, örnek dosya geçerliliği, senaryo kapsamı, tarih sabitleme, AI gövdesi maskeleme |
 | `tests/test_smoke.py` | Paket içe aktarımı ve sürüm |
 
-Mevcut durum: **560 test**; bunların 387'ü `unit`, 170'i `integration` olarak işaretlenmiştir, üç duman testi işaret taşımaz.
+Mevcut durum: **563 test**; bunların 390'ı `unit`, 170'i `integration` olarak işaretlenmiştir, üç duman testi işaret taşımaz.
 
 ### Sürekli entegrasyon
 

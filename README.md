@@ -75,6 +75,7 @@ The AI analysis is an explanation layer, not a decision layer:
 - It does not produce a supplier ranking or select a winning bid.
 - It never receives the raw Excel file, the notes column, quote numbers or real supplier names. Payment terms are forwarded as typed, which is why that cell should not contain identifiers (see [Limitations](#limitations)).
 - If its response contains a number that cannot be matched to the verified source figures, the analysis is rejected and not displayed.
+- A rejected response is retried **once**: the model is told which expressions failed and asked to rewrite them in the verified format. If the second attempt also fails, the analysis is withheld. Strictness is unchanged; only a single recoverable retry is added.
 - "Lowest" claims are verified per clause. One sentence can name two metrics ("lowest product cost, and on total cost …"), so each claim is compared against the metric in its own clause. "Product cost" counts as the product cost, not the total. A claim is rejected only when none of the suppliers named in its clause holds the mark; if the attribution is ambiguous, it stays silent.
 
 ---
@@ -237,7 +238,7 @@ ai-procurement-intelligence/
 │   ├── ai_analysis.py              # Masked request builder and AI response validation
 │   ├── report.py                   # Excel and PDF report builders
 │   └── demo_data.py                # Blank template and sample workbook generation (in memory)
-└── tests/                          # 560 tests across 9 files
+└── tests/                          # 563 tests across 9 files
 ```
 
 ### Module responsibilities
@@ -273,7 +274,7 @@ The parser raises one exception hierarchy whose messages are user-facing and fre
 | `tests/test_demo_data.py` | Blank template contract, sample workbook validity, scenario coverage, date anchoring, AI payload masking |
 | `tests/test_smoke.py` | Package import and version |
 
-Current state: **560 tests**, of which 387 are marked `unit` and 170 `integration`; three smoke tests carry no marker.
+Current state: **563 tests**, of which 390 are marked `unit` and 170 `integration`; three smoke tests carry no marker.
 
 ### Continuous integration
 
