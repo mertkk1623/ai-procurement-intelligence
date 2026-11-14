@@ -33,6 +33,14 @@ if str(ROOT / "src") not in sys.path:
 
 from procurement import ai_analysis  # noqa: E402
 from procurement.calculator import CalculationResult, calculate  # noqa: E402
+from procurement.demo_data import (  # noqa: E402
+    BLANK_FILENAME,
+    SAMPLE_FILENAME,
+    DemoDataError,
+    build_blank_template,
+    build_sample_workbook,
+    sample_supplier_count,
+)
 from procurement.excel_parser import (  # noqa: E402
     ExcelParserError,
     ParsedWorkbook,
@@ -468,7 +476,90 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   margin-bottom: 1rem;
 }
 
-/* -------------------------------------------------------------- landing --- */
+.st-key-quickstart {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.125rem 1.25rem 1.25rem;
+  margin: 0.25rem 0 1.25rem;
+}
+.qs-head {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: 0.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #f0f1f4;
+}
+.st-key-quickstart .qs-title {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin: 0; padding: 0;
+  font-size: 0.9375rem; font-weight: 600; line-height: 1.3; color: var(--ink);
+}
+.st-key-quickstart .qs-title .qs-tag {
+  font-size: 0.625rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--lowest-bg);
+  border: 1px solid var(--lowest-border);
+  color: #054f31;
+}
+.st-key-quickstart .qs-sub {
+  margin: 0.35rem 0 0; font-size: 0.8125rem; color: var(--ink-soft);
+  line-height: 1.5;
+}
+.st-key-quickstart .qs-meta {
+  display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem;
+  margin: 0.75rem 0 0.75rem;
+}
+.st-key-quickstart .qs-meta span {
+  font-size: 0.6875rem; color: var(--muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  line-height: 1.6;
+}
+.st-key-quickstart [data-testid="stButton"] button,
+.st-key-quickstart [data-testid="stDownloadButton"] button {
+  border-radius: 9px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  width: 100%;
+}
+[data-testid="stButton"] button:disabled {
+  background: var(--surface-muted);
+  color: var(--muted);
+  border-color: var(--border);
+}
+.qs-note {
+  margin: 0.875rem 0 0;
+  padding: 0.75rem 0.875rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.75rem; color: var(--ink-soft); line-height: 1.6;
+}
+.qs-note strong { color: var(--ink); font-weight: 600; }
+.qs-note ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+.qs-note li { margin-bottom: 0.2rem; }
+.qs-note li:last-child { margin-bottom: 0; }
+.qs-note code {
+  font-size: 0.6875rem; background: #ffffff;
+  border: 1px solid var(--border); border-radius: 5px; padding: 0.05rem 0.25rem;
+}
+.qs-active {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  padding: 0.75rem 0.875rem;
+  background: var(--lowest-bg);
+  border: 1px solid var(--lowest-border);
+  border-radius: 10px;
+  font-size: 0.8125rem; color: #054f31; line-height: 1.5;
+}
+.qs-active strong { font-weight: 600; }
+
+/* ------------------------------------------------------------- landing --- */
 .howto-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -833,6 +924,8 @@ table.cmp td.is-missing { color: var(--muted); font-style: italic; }
   .guide { padding: 0 1rem; }
   .guide-grid { grid-template-columns: 1fr; gap: 1rem; padding: 1rem 0 1.125rem; }
   .guide > summary { padding: 0.875rem 0; }
+  .st-key-quickstart { padding: 1rem; }
+  .qs-head { flex-direction: column; align-items: flex-start; }
 }
 </style>
 """
@@ -868,6 +961,214 @@ def _template_bytes() -> bytes | None:
         return TEMPLATE_PATH.read_bytes()
     except OSError:
         return None
+
+
+def _blank_template_bytes() -> bytes | None:
+    """Boş (veri satırı olmayan) şablonu bellekte üretir.
+
+    Üretim resmî şablonun kopyası üzerinden yapılır; sayfa adları, sütun
+    başlıkları ve açılır liste doğrulamaları korunur. Üretilemezse şablon
+    indirme panelindeki uyarı gösterilir.
+    """
+    try:
+        return build_blank_template(TEMPLATE_PATH)
+    except DemoDataError:
+        return None
+
+
+def _sample_workbook_bytes() -> bytes | None:
+    """AI demo için dolu örnek dosyayı bellekte üretir."""
+    try:
+        return build_sample_workbook(TEMPLATE_PATH)
+    except DemoDataError:
+        return None
+
+
+def _demo_assets() -> tuple[bytes | None, bytes | None]:
+    """Boş şablon ve dolu örnek dosyayı oturum başına bir kez üretir.
+
+    Üretim tarihe bağlıdır (teklif/geçerlilik tarihleri bugüne göre yazılır).
+    Bu yüzden sonuç gün anahtarıyla önbelleklenir: aynı gün içindeki her
+    yeniden çizim aynı baytları kullanır, gün değişince dosyalar tazelenir.
+    Böylece indirme düğmeleri her etkileşimde yeni bir dosya üretmez.
+    """
+    day = date.today().isoformat()
+    cached = st.session_state.get("demo_assets")
+    if (
+        isinstance(cached, dict)
+        and cached.get("day") == day
+        and isinstance(cached.get("blank"), bytes)
+        and isinstance(cached.get("sample"), bytes)
+    ):
+        return cached["blank"], cached["sample"]
+
+    blank = _blank_template_bytes()
+    sample = _sample_workbook_bytes()
+    if blank is not None and sample is not None:
+        st.session_state["demo_assets"] = {
+            "day": day,
+            "blank": blank,
+            "sample": sample,
+        }
+    return blank, sample
+
+
+def _demo_error(message: str) -> None:
+    """Hızlı başlangıç panelinde okunur hata mesajı gösterir."""
+    st.markdown(
+        '<div class="ai-status is-warn"><div>'
+        f"<strong>Örnek veri hazırlanamadı.</strong> {html.escape(message)} "
+        "Kendi dosyanızı yükleyerek devam edebilirsiniz.</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _start_demo() -> None:
+    """Örnek dosyayı üretip oturum state'ine koyar.
+
+    Dosya **diske yazılmaz**; yalnızca oturumda bayt olarak tutulur. Aynı
+    oturumda yeniden üretilmediği için AI analizi imzası da sabit kalır.
+    """
+    _blank, sample = _demo_assets()
+    if sample is None:
+        st.session_state["demo_error"] = "Örnek çalışma kitabı oluşturulamadı."
+        return
+    st.session_state["demo_file"] = {
+        "name": SAMPLE_FILENAME,
+        "payload": sample,
+        "suppliers": sample_supplier_count(),
+    }
+    st.session_state.pop("demo_error", None)
+
+
+def _close_demo() -> None:
+    """Demo dosyasını oturumdan kaldırır."""
+    st.session_state.pop("demo_file", None)
+
+
+def _render_demo_banner(demo: dict) -> None:
+    """Analiz ekranında örnek verinin yüklü olduğunu belirtir.
+
+    Demo dosyası kullanıcı yüklemesi gibi okunur; bu şerit yalnızca verinin
+    kurgusal olduğunu hatırlatır ve tek tıkla kapatma sunar.
+    """
+    suppliers = demo.get("suppliers")
+    count = f"{suppliers} tedarikçi teklifi" if suppliers else "örnek teklifler"
+    columns = st.columns([3, 1], vertical_alignment="center")
+    with columns[0]:
+        st.markdown(
+            '<div class="qs-active"><div>'
+            "<strong>Örnek veri seti yüklü (demo).</strong> "
+            f"{html.escape(str(count))} kurgusal veriyle analiz çalışıyor. "
+            "Tedarikçi adları ve tutarlar gerçek teklif değildir."
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
+    with columns[1]:
+        if st.button("✕ Örnek veriyi kapat", key="close-demo-active", width="stretch"):
+            _close_demo()
+            st.rerun()
+
+
+def _render_quickstart() -> None:
+    """Hızlı başlangıç paneli: demo, boş şablon ve dolu örnek indirmesi.
+
+    Panel yalnızca başlangıç ekranında gösterilir. Üç eylem de dosya yükleme
+    alanından **önce** sunulur; demo düğmesi yükleme adımını atlar: örnek veri
+    doğrudan oturuma konur ve analiz ekranı çalışır.
+    """
+    with st.container(key="quickstart"):
+        st.markdown(
+            '<div class="qs-head"><div>'
+            '<h3 class="qs-title">Hızlı Başlangıç'
+            '<span class="qs-tag">Demo</span></h3>'
+            '<p class="qs-sub">Dosya indirmeden deneyin veya kendi veriniz '
+            "için hazır şablonu kullanın. Örnek veri yalnızca bu düğmeyle "
+            "yüklenir; kendiliğinden çalışmaz.</p>"
+            "</div></div>"
+            '<div class="qs-meta">'
+            f"<span>{sample_supplier_count()} tedarikçi teklifi</span>"
+            "<span>Fiyat uçurumu · termin darboğazı</span>"
+            "<span>Eksik veri · süresi geçmiş teklif</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        columns = st.columns(3)
+        with columns[0]:
+            if st.button(
+                "🚀 Örnek Veri ile Hemen Dene (AI Demo)",
+                key="load-demo",
+                type="primary",
+                width="stretch",
+            ):
+                _start_demo()
+                st.rerun()
+
+        blank, sample = _demo_assets()
+
+        with columns[1]:
+            if blank is None:
+                st.button(
+                    "📥 Boş Veri Şablonunu İndir",
+                    key="blank-template-unavailable",
+                    disabled=True,
+                    width="stretch",
+                    help="Şablon dosyası okunamadığı için indirme hazırlanamadı.",
+                )
+            else:
+                st.download_button(
+                    "📥 Boş Veri Şablonunu İndir",
+                    data=blank,
+                    file_name=BLANK_FILENAME,
+                    mime=EXCEL_MIME,
+                    key="download-blank-template",
+                    width="stretch",
+                )
+
+        with columns[2]:
+            if sample is None:
+                st.button(
+                    "📊 Örnek Dolu Dosyayı İndir",
+                    key="sample-download-unavailable",
+                    disabled=True,
+                    width="stretch",
+                    help="Örnek dosya oluşturulamadığı için indirme hazırlanamadı.",
+                )
+            else:
+                st.download_button(
+                    "📊 Örnek Dolu Dosyayı İndir",
+                    data=sample,
+                    file_name=SAMPLE_FILENAME,
+                    mime=EXCEL_MIME,
+                    key="download-sample",
+                    width="stretch",
+                )
+
+        error = st.session_state.get("demo_error")
+        if error:
+            _demo_error(str(error))
+
+        st.markdown(
+            '<div class="qs-note"><strong>Örnek veri seti; satın alma '
+            "önerileri, risk analizi ve maliyet karşılaştırması AI "
+            "özelliklerini test etmeniz için gerçekçi senaryolar "
+            "içerir.</strong>"
+            "<ul>"
+            "<li><strong>AI satın alma önerileri:</strong> tedarikçiler arasında "
+            "belirgin birim fiyat farkları, ürün bedeli ile toplam maliyetin "
+            "ayrıştığı satırlar ve nakliye konsolidasyon fırsatları.</li>"
+            "<li><strong>Risk ve veri kalitesi analizi:</strong> 420 güne varan "
+            "termin darboğazı, süresi geçmiş teklif, eksik nakliye, gerekçesiz "
+            "nakliye varsayımı ve referans dışı kg/m beyanları.</li>"
+            "<li><strong>Maliyet karşılaştırması:</strong> 26,40–35,40 TL/kg "
+            "fiyat aralığı, Peşin/Net 30–90 ve karma ödeme koşulları.</li>"
+            "</ul>"
+            "Dosyayı incelemek veya değiştirip yeniden yüklemek için yukarıdaki "
+            "<em>Örnek Dolu Dosyayı İndir</em> düğmesini kullanın."
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def _render_template_download() -> None:
@@ -1057,15 +1358,14 @@ def _rfq_quantity_text(value: object) -> str | None:
     return format_quantity_value(value)
 
 
-def _file_signature(uploaded) -> str:
-    """Yüklenen dosyanın içeriğinden kısa bir imza üretir.
+def _file_signature(name: str, payload: bytes) -> str:
+    """Dosya adı ve içerikten kısa bir imza üretir.
 
     AI analizi oturumda saklandığı için imza değişince eski sonuç
     temizlenir; böylece yeni dosyanın analizi eski dosyanın metniyle
     karışmaz. İçerik loglanmaz, yalnızca özeti tutulur.
     """
-    payload = uploaded.getvalue() if hasattr(uploaded, "getvalue") else b""
-    return f"{uploaded.name}:{hashlib.sha256(payload).hexdigest()[:16]}"
+    return f"{name}:{hashlib.sha256(payload).hexdigest()[:16]}"
 
 
 def _analysis_signature(
@@ -1753,6 +2053,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Hızlı başlangıç paneli dosya yükleme alanının hemen üstünde durur ve yalnızca
+# başlangıç ekranında gösterilir. Panel bir yer tutucuya çizilir: yükleme
+# yapıldıktan (veya demo etkinleştikten) sonra yer tutucu boşaltılır. Böylece
+# panel ve indirme düğmeleri analiz ekranına taşınmaz, mevcut akış korunur.
+quickstart_slot = st.empty()
+
 uploaded = st.file_uploader(
     "Excel teklif şablonu",
     type=["xlsx"],
@@ -1760,11 +2066,37 @@ uploaded = st.file_uploader(
     label_visibility="collapsed",
 )
 
-if uploaded is None:
+# Yükleme kaynağı tek bir sözleşmeye indirgenir: kullanıcı dosyası varsa o,
+# yoksa oturumdaki demo dosyası. Böylece parse → validate → calculate zinciri
+# ve dosya imzası iki kaynak için de aynı koddan geçer.
+demo_file = st.session_state.get("demo_file")
+demo_payload = (
+    demo_file.get("payload")
+    if isinstance(demo_file, dict) and demo_file.get("payload")
+    else None
+)
+
+if uploaded is None and demo_payload is None:
+    with quickstart_slot.container():
+        _render_quickstart()
+
+uploaded_name: str | None = None
+uploaded_payload: bytes | None = None
+
+if uploaded is not None:
+    uploaded_name = uploaded.name
+    uploaded_payload = uploaded.getvalue()
+elif demo_payload is not None:
+    uploaded_name = str(demo_file.get("name") or SAMPLE_FILENAME)
+    uploaded_payload = demo_payload
+
+if uploaded_payload is None or uploaded_name is None:
     st.markdown(
         '<div class="empty-state"><h3>Henüz dosya yüklenmedi</h3>'
-        "<p>Karşılaştırma, yüklediğiniz dosyadaki doğrulanmış verilerle üretilir. "
-        "Örnek veya varsayılan veri kullanılmaz.</p></div>",
+        "<p>Karşılaştırma, yüklediğiniz dosyadaki doğrulanmış verilerle "
+        "üretilir. Örnek veriyi denemek için yukarıdaki "
+        "<strong>Örnek Veri ile Hemen Dene</strong> düğmesini kullanın.</p>"
+        "</div>",
         unsafe_allow_html=True,
     )
     _render_how_it_works()
@@ -1773,8 +2105,19 @@ if uploaded is None:
     _render_roadmap()
     st.stop()
 
+# Demo dosyası yalnızca kullanıcı dosyası yokken etkindir; kullanıcı kendi
+# dosyasını yüklediğinde demo oturumdan düşer ve karışıklık oluşmaz.
+is_demo = uploaded is None
+if not is_demo:
+    st.session_state.pop("demo_file", None)
+
+# Demo şeridi ayrıştırmadan **önce** çizilir: dosya okunamazsa bile kullanıcı
+# örnek veriyi kapatabilir; aksi hâlde bozuk bir demo oturumda kilitli kalırdı.
+if is_demo:
+    _render_demo_banner(demo_file if isinstance(demo_file, dict) else {})
+
 try:
-    parsed, validation, result = _analyze(uploaded.getvalue())
+    parsed, validation, result = _analyze(uploaded_payload)
 except ExcelParserError as error:
     st.markdown(
         '<div class="reject"><h2>Dosya okunamadı</h2>'
@@ -1783,10 +2126,13 @@ except ExcelParserError as error:
     )
     st.stop()
 
+file_name = uploaded_name
+file_signature = _file_signature(file_name, uploaded_payload)
+
 findings = group_findings(validation)
 st.markdown(
     f'<div class="info-strip"><span>Dosya: '
-    f"<strong>{html.escape(uploaded.name)}</strong></span>"
+    f"<strong>{html.escape(file_name)}</strong></span>"
     f"<span>Tedarikçi satırı: {len(parsed.suppliers)}</span></div>",
     unsafe_allow_html=True,
 )
@@ -1827,17 +2173,15 @@ if view is None:
     view = VIEW_DASHBOARD
 
 if view == VIEW_DASHBOARD:
-    _render_dashboard(parsed, validation, result, uploaded.name)
+    _render_dashboard(parsed, validation, result, file_name)
 elif view == VIEW_COMPARISON:
     _render_comparison(parsed, validation, result)
 elif view == VIEW_ROADMAP:
     _render_roadmap()
 else:
-    _render_ai(parsed, validation, result, _file_signature(uploaded))
+    _render_ai(parsed, validation, result, file_signature)
 
-_render_reports(
-    parsed, validation, result, uploaded.name, _file_signature(uploaded)
-)
+_render_reports(parsed, validation, result, file_name, file_signature)
 
 # --- Alt bilgi ------------------------------------------------------------ #
 st.markdown(

@@ -56,6 +56,7 @@ All items below are implemented and verified in the current source code.
 | Feature | What it does |
 |---|---|
 | **Excel quotation template** | A ready-made `.xlsx` template (`templates/supplier_quote_template.xlsx`, template version 1.0) with `Instructions`, `RFQ` and `Supplier Quotes` sheets and 14 quotation columns. Downloadable directly from the start screen. |
+| **Quick start panel and demo data** | Above the uploader, a three-action panel serves a blank template with per-column guidance, a downloadable sample workbook, and a one-click demo that loads 35 realistic supplier quotations straight into session state and runs the whole analysis without a download or upload round-trip. The blank and sample files are generated from the bundled template in memory, so their headers, styles and data validations are identical to the real one. |
 | **Excel upload and parsing** | Accepts `.xlsx` files up to 5 MB, opens the workbook with `data_only=False`, rejects formula cells instead of trusting cached values, and reports structural problems (missing sheets, missing or duplicate headers, missing fields, unsupported format). |
 | **Data validation** | A rule catalogue of 46 codes — 29 blocking errors, 16 warnings, 1 information request — covering template version, profile specification, length, currency, quantity, weight, price, shipping source, payment terms, quote validity, duplicate suppliers, names and number formatting. |
 | **Deterministic cost calculation** | `Decimal`-based engine computing total length, total weight, product cost, shipping per kg and total supply cost. No VAT is applied anywhere. Missing shipping is never treated as zero. |
@@ -111,7 +112,15 @@ Both reports were produced by the application from the same demonstration workbo
 
 ## How It Works
 
-The workflow below matches the current implementation in `app.py`. Before a file is uploaded, the start screen presents a five-step overview (download the template, fill in supplier quotations, upload the workbook, review the analysis, download reports), the template download, a collapsible Excel guide and the product roadmap.
+The workflow below matches the current implementation in `app.py`. Before a file is uploaded, the start screen presents a five-step overview (download the template, fill in supplier quotations, upload the workbook, review the analysis, download reports), the **quick start panel**, the template download, a collapsible Excel guide and the product roadmap.
+
+The quick start panel sits directly above the uploader and offers three actions:
+
+- **🚀 Örnek Veri ile Hemen Dene (AI Demo):** builds the 35-row sample workbook, places it in session state without writing to disk, and runs the whole analysis. No download or upload round-trip is needed, and the demo is dropped automatically as soon as the user uploads their own file.
+- **📥 Boş Veri Şablonunu İndir:** the blank `.xlsx` — the deliberate `HAYIR` confirmation is preserved, there are no supplier rows, and each column carries a short guidance note.
+- **📊 Örnek Dolu Dosyayı İndir:** the same sample data as a file, for inspection or for editing and re-uploading.
+
+Both files are generated in memory from `templates/supplier_quote_template.xlsx`, so sheet names, the 14 headers, styles and data validations stay identical to the real template. Dates are written relative to today's date, which keeps the sample valid over time. The generation code lives in `src/procurement/demo_data.py` and leaves no files on disk.
 
 1. **Download the Excel template.**
    On the start screen, `st.download_button` serves `templates/supplier_quote_template.xlsx` as `tedarikci-teklif-sablonu.xlsx`. If the file cannot be read, the app shows a readable warning instead of a button.
@@ -225,8 +234,9 @@ ai-procurement-intelligence/
 │   ├── calculator.py               # Deterministic Decimal cost engine
 │   ├── presentation.py             # View models, formatting, KPI and chart builders
 │   ├── ai_analysis.py              # Masked request builder and AI response validation
-│   └── report.py                   # Excel and PDF report builders
-└── tests/                          # 471 tests across 8 files
+│   ├── report.py                   # Excel and PDF report builders
+│   └── demo_data.py                # Blank template and sample workbook generation (in memory)
+└── tests/                          # 504 tests across 9 files
 ```
 
 ### Module responsibilities
@@ -240,6 +250,7 @@ ai-procurement-intelligence/
 | `procurement/presentation.py` | Converts engine output into display models: comparison rows, KPI cards, summary card, Plotly figure, grouped findings, excluded row views, rejection hints. Formats money, weight, rate, quantity and days in Turkish notation. |
 | `procurement/ai_analysis.py` | Builds the masked payload, calls the OpenAI-compatible endpoint, parses the five-section response, and rejects any response containing unverified numeric figures. |
 | `procurement/report.py` | Builds the `.xlsx` workbook in memory and the A4 PDF with ReportLab. Both accept an optional AI analysis. |
+| `procurement/demo_data.py` | Holds the 35-row sample dataset and the per-column guidance, and renders both the blank template and the sample workbook from `templates/supplier_quote_template.xlsx` into memory bytes. Dates are anchored to the current day. Nothing is written to disk. |
 
 ### Error handling
 
@@ -257,10 +268,11 @@ The parser raises one exception hierarchy whose messages are user-facing and fre
 | `tests/test_presentation.py` | Formatting, tables, KPIs, chart data, summary text |
 | `tests/test_ai_analysis.py` | Payload masking, numeric verification, error kinds |
 | `tests/test_report.py` | Excel sheets and PDF structure |
-| `tests/test_app.py` | Streamlit views through `AppTest`, including navigation and roadmap |
+| `tests/test_app.py` | Streamlit views through `AppTest`, including navigation, quick start panel and demo flow |
+| `tests/test_demo_data.py` | Blank template contract, sample workbook validity, scenario coverage, date anchoring, AI payload masking |
 | `tests/test_smoke.py` | Package import and version |
 
-Current state: **471 tests**, of which 331 are marked `unit` and 137 `integration`; three smoke tests carry no marker.
+Current state: **504 tests**, of which 331 are marked `unit` and 170 `integration`; three smoke tests carry no marker.
 
 ### Continuous integration
 
@@ -468,7 +480,7 @@ Verified current limitations:
 - **AI depends on an external service.** Without a valid `DEPLOY_API_KEY`, or if the endpoint is unreachable, the AI view is unavailable; all other features remain functional.
 - **AI payload scope.** Supplier names, notes, quote numbers and the file name are excluded from the AI request, but the payment-terms cell is sent as typed. That cell is free text and may contain an identifier the user entered; it is not masked.
 - **Screenshot coverage.** Five screenshots are included: dashboard, supplier comparison, cost charts, AI analysis and product roadmap. The start/upload screen and the report download section are not captured.
-- **Sample data is illustrative only.** The demonstration workbook behind the screenshots and the sample reports is not committed; the supplier names and figures in those files are examples, not real quotations.
+- **Sample data is illustrative only.** The demonstration workbook behind the screenshots and the sample reports is not committed; the supplier names and figures in those files are examples, not real quotations. The in-app demo dataset (`src/procurement/demo_data.py`) is likewise fictional and generated at runtime.
 
 ---
 

@@ -56,6 +56,7 @@ Aşağıdaki maddelerin tamamı mevcut kaynak kodda uygulanmış ve doğrulanmı
 | Özellik | Ne yapar |
 |---|---|
 | **Excel teklif şablonu** | `Instructions`, `RFQ` ve `Supplier Quotes` sayfalarından ve 14 teklif sütunundan oluşan hazır `.xlsx` şablonu (`templates/supplier_quote_template.xlsx`, şablon sürümü 1.0). Başlangıç ekranından doğrudan indirilebilir. |
+| **Hızlı başlangıç paneli ve örnek veri** | Yükleme alanının üstünde üç eylem sunan panel: sütun açıklamalı boş şablon indirmesi, indirilebilir dolu örnek dosya ve tek tıkla 35 gerçekçi tedarikçi teklifini doğrudan oturum durumuna koyup tüm analizi indirme/yükleme adımı olmadan çalıştıran demo. Boş ve dolu dosyalar paketlenen şablondan bellekte üretilir; başlıklar, stiller ve veri doğrulamaları gerçek şablonla birebir aynıdır. |
 | **Excel yükleme ve ayrıştırma** | 5 MB'a kadar `.xlsx` kabul eder, çalışma kitabını `data_only=False` ile açar, önbelleğe alınmış değerlere güvenmek yerine formül hücrelerini reddeder ve yapısal sorunları bildirir (eksik sayfa, eksik veya mükerrer başlık, eksik alan, desteklenmeyen biçim). |
 | **Veri doğrulama** | 46 kodlu kural kataloğu — 29 bloklayıcı hata, 16 uyarı, 1 bilgi talebi. Şablon sürümü, profil ölçüsü, uzunluk, para birimi, miktar, ağırlık, fiyat, nakliye kaynağı, ödeme koşulları, teklif geçerliliği, mükerrer tedarikçi, adlar ve sayı biçimi kapsanır. |
 | **Deterministik maliyet hesabı** | `Decimal` tabanlı motor; toplam uzunluk, toplam ağırlık, ürün bedeli, kg başına nakliye ve toplam tedarik maliyetini hesaplar. Hiçbir aşamada KDV uygulanmaz. Eksik nakliye asla sıfır sayılmaz. |
@@ -111,7 +112,15 @@ Her iki rapor da uygulama tarafından aynı gösterim çalışma kitabından, AI
 
 ## Nasıl Çalışır?
 
-Aşağıdaki akış `app.py` içindeki mevcut uygulamayla birebir eşleşir. Dosya yüklenmeden önce başlangıç ekranı beş adımlı bir özet (şablonu indir, tedarikçi tekliflerini doldur, dosyayı yükle, analizi incele, raporları indir), şablon indirmesini, katlanabilir bir Excel rehberini ve ürün yol haritasını gösterir.
+Aşağıdaki akış `app.py` içindeki mevcut uygulamayla birebir eşleşir. Dosya yüklenmeden önce başlangıç ekranı beş adımlı bir özet (şablonu indir, tedarikçi tekliflerini doldur, dosyayı yükle, analizi incele, raporları indir), **hızlı başlangıç paneli**, şablon indirmesini, katlanabilir bir Excel rehberini ve ürün yol haritasını gösterir.
+
+Hızlı başlangıç paneli yükleme alanının hemen üstünde üç eylem sunar:
+
+- **🚀 Örnek Veri ile Hemen Dene (AI Demo):** 35 satırlık örnek çalışma kitabını üretir, diske yazmadan doğrudan oturum durumuna koyar ve analizi çalıştırır. İndirme veya yükleme gerekmez; kullanıcı kendi dosyasını yüklediğinde demo otomatik olarak düşer.
+- **📥 Boş Veri Şablonunu İndir:** `HAYIR` beyanı korunmuş, tedarikçi satırı içermeyen ve her sütun için kısa açıklama taşıyan `.xlsx` dosyası.
+- **📊 Örnek Dolu Dosyayı İndir:** Aynı veriyi dosya olarak incelemek veya değiştirip yeniden yüklemek için.
+
+Her iki dosya da `templates/supplier_quote_template.xlsx` şablonundan bellekte üretilir; sayfa adları, 14 başlık, stiller ve veri doğrulamaları değişmez. Tarihler bugüne göre yazılır, böylece örnek veri her gün geçerli kalır. Üretim `src/procurement/demo_data.py` içindedir ve diske hiçbir dosya bırakmaz.
 
 1. **Excel şablonunu indirin.**
    Başlangıç ekranında `st.download_button`, `templates/supplier_quote_template.xlsx` dosyasını `tedarikci-teklif-sablonu.xlsx` adıyla sunar. Dosya okunamazsa buton yerine anlaşılır bir uyarı gösterilir.
@@ -225,8 +234,9 @@ ai-procurement-intelligence/
 │   ├── calculator.py               # Deterministik Decimal maliyet motoru
 │   ├── presentation.py             # Görünüm modelleri, biçimlendirme, KPI ve grafik üreticileri
 │   ├── ai_analysis.py              # Maskelenmiş istek üretimi ve AI yanıt doğrulaması
-│   └── report.py                   # Excel ve PDF rapor üreticileri
-└── tests/                          # 8 dosyada 471 test
+│   ├── report.py                   # Excel ve PDF rapor üreticileri
+│   └── demo_data.py                # Boş şablon ve örnek çalışma kitabı üretimi (bellekte)
+└── tests/                          # 9 dosyada 504 test
 ```
 
 ### Modül sorumlulukları
@@ -240,6 +250,7 @@ ai-procurement-intelligence/
 | `procurement/presentation.py` | Motor çıktısını gösterim modellerine dönüştürür: karşılaştırma satırları, KPI kartları, özet kartı, Plotly figürü, gruplanmış bulgular, karşılaştırma dışı satır görünümleri, ret ipuçları. Para, ağırlık, oran, miktar ve gün değerlerini Türkçe gösterimle biçimlendirir. |
 | `procurement/ai_analysis.py` | Maskelenmiş istek gövdesini üretir, OpenAI uyumlu uç noktayı çağırır, beş bölümlü yanıtı ayrıştırır ve doğrulanmamış sayısal ifade içeren yanıtları reddeder. |
 | `procurement/report.py` | `.xlsx` çalışma kitabını bellekte ve A4 PDF'i ReportLab ile üretir. İkisi de isteğe bağlı AI analizi kabul eder. |
+| `procurement/demo_data.py` | 35 satırlık örnek veri setini ve sütun açıklamalarını barındırır; boş şablonu ve örnek çalışma kitabını `templates/supplier_quote_template.xlsx` üzerinden bellekte bayt olarak üretir. Tarihler bugüne göre sabitlenir, diske hiçbir dosya yazılmaz. |
 
 ### Hata yönetimi
 
@@ -257,10 +268,11 @@ Ayrıştırıcı, mesajları kullanıcıya dönük ve dosya sistemi yollarından
 | `tests/test_presentation.py` | Biçimlendirme, tablolar, KPI'lar, grafik verisi, özet metni |
 | `tests/test_ai_analysis.py` | İstek maskeleme, sayı doğrulama, hata türleri |
 | `tests/test_report.py` | Excel sayfaları ve PDF yapısı |
-| `tests/test_app.py` | `AppTest` ile Streamlit görünümleri; navigasyon ve yol haritası dahil |
+| `tests/test_app.py` | `AppTest` ile Streamlit görünümleri; navigasyon, hızlı başlangıç paneli ve demo akışı dahil |
+| `tests/test_demo_data.py` | Boş şablon sözleşmesi, örnek dosya geçerliliği, senaryo kapsamı, tarih sabitleme, AI gövdesi maskeleme |
 | `tests/test_smoke.py` | Paket içe aktarımı ve sürüm |
 
-Mevcut durum: **471 test**; bunların 331'i `unit`, 137'si `integration` olarak işaretlenmiştir, üç duman testi işaret taşımaz.
+Mevcut durum: **504 test**; bunların 331'i `unit`, 170'i `integration` olarak işaretlenmiştir, üç duman testi işaret taşımaz.
 
 ### Sürekli entegrasyon
 
@@ -468,7 +480,7 @@ Doğrulanmış güncel sınırlamalar:
 - **AI harici bir servise bağlıdır.** Geçerli bir `DEPLOY_API_KEY` yoksa veya uç noktaya ulaşılamıyorsa AI görünümü kullanılamaz; diğer tüm özellikler çalışmaya devam eder.
 - **AI isteğinin kapsamı.** Tedarikçi adları, notlar, teklif numaraları ve dosya adı AI isteğine dahil edilmez; ancak ödeme koşulu hücresi girildiği biçimde gönderilir. Bu hücre serbest metindir ve kullanıcının yazdığı bir tanımlayıcı içerebilir; maskelenmez.
 - **Ekran görüntüsü kapsamı.** Beş ekran görüntüsü eklenmiştir: dashboard, tedarikçi karşılaştırması, maliyet grafikleri, AI analizi ve ürün yol haritası. Başlangıç/yükleme ekranı ile rapor indirme bölümü görüntülenmemiştir.
-- **Örnek veriler yalnızca gösterim amaçlıdır.** Ekran görüntülerinin ve örnek raporların arkasındaki gösterim çalışma kitabı depoya eklenmemiştir; bu dosyalardaki tedarikçi adları ve tutarlar gerçek teklifler değil, örnektir.
+- **Örnek veriler yalnızca gösterim amaçlıdır.** Ekran görüntülerinin ve örnek raporların arkasındaki gösterim çalışma kitabı depoya eklenmemiştir; bu dosyalardaki tedarikçi adları ve tutarlar gerçek teklifler değil, örnektir. Uygulama içi demo veri seti (`src/procurement/demo_data.py`) de kurgusaldır ve çalışma anında üretilir.
 
 ---
 

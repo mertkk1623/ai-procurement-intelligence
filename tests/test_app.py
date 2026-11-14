@@ -157,14 +157,19 @@ def test_template_download_is_available_on_start_screen():
     test = _app()
     labels = [button.label for button in test.download_button]
 
-    assert labels == ["Excel şablonunu indir"]
+    assert labels == [
+        "📥 Boş Veri Şablonunu İndir",
+        "📊 Örnek Dolu Dosyayı İndir",
+        "Excel şablonunu indir",
+    ]
     assert "Excel şablonunu indir" in _markdown(test)
     assert "Nasıl Çalışır?" in _markdown(test)
 
 
 def test_template_download_points_to_xlsx_file():
     test = _app()
-    button = test.download_button[0]
+    buttons = {button.label: button for button in test.download_button}
+    button = buttons["Excel şablonunu indir"]
 
     assert button.proto.url.endswith(".xlsx")
     assert button.proto.id.endswith("download-template")
@@ -222,6 +227,173 @@ def test_uploaded_file_replaces_template_download(tmp_path):
     labels = [button.label for button in test.download_button]
 
     assert labels == ["Excel raporunu indir", "PDF raporunu indir"]
+
+
+# --------------------------------------------------------------------------- #
+# Hızlı başlangıç paneli ve örnek veri
+# --------------------------------------------------------------------------- #
+
+
+def _start_demo(test: AppTest) -> AppTest:
+    """Örnek veri düğmesine basar; dosya yüklemeden analiz ekranı açılır."""
+    test.button(key="load-demo").click()
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+    return test
+
+
+def test_quickstart_panel_is_visible_before_upload():
+    """Panel dosya yükleme alanının üstünde üç eylemle görünür."""
+    test = _app()
+    text = _markdown(test)
+
+    assert [button.label for button in test.button] == [
+        "🚀 Örnek Veri ile Hemen Dene (AI Demo)"
+    ]
+    assert "Hızlı Başlangıç" in text
+    assert "Örnek veri seti;" in text
+    assert "AI özelliklerini test etmeniz için gerçekçi senaryolar" in text
+
+
+def test_quickstart_downloads_serve_parseable_workbooks(monkeypatch):
+    """Boş şablon ve dolu örnek dosya geçerli, ayrı .xlsx dosyalarıdır."""
+    from io import BytesIO
+
+    import streamlit as st_module
+
+    captured: dict[str, object] = {}
+    original = st_module.download_button
+
+    def spy(label, data=None, **kwargs):
+        key = kwargs.get("key")
+        if key in {"download-blank-template", "download-sample"}:
+            captured[key] = {
+                "label": label,
+                "data": data,
+                "file_name": kwargs.get("file_name"),
+                "mime": kwargs.get("mime"),
+            }
+        return original(label, data=data, **kwargs)
+
+    monkeypatch.setattr(st_module, "download_button", spy)
+
+    test = _app()
+
+    assert not test.exception, [str(e) for e in test.exception]
+    blank = captured["download-blank-template"]
+    sample = captured["download-sample"]
+
+    assert blank["label"] == "📥 Boş Veri Şablonunu İndir"
+    assert sample["label"] == "📊 Örnek Dolu Dosyayı İndir"
+    assert str(blank["file_name"]).endswith(".xlsx")
+    assert str(sample["file_name"]).endswith(".xlsx")
+    assert blank["file_name"] != sample["file_name"]
+    assert blank["mime"] == XLSX_MIME
+    assert sample["mime"] == XLSX_MIME
+    assert blank["data"] != sample["data"]
+
+    blank_book = load_workbook(BytesIO(blank["data"]))
+    sample_book = load_workbook(BytesIO(sample["data"]))
+    try:
+        assert blank_book["Supplier Quotes"]["A3"].value is None
+        assert sample_book["Supplier Quotes"]["A3"].value is not None
+        assert blank_book.sheetnames == sample_book.sheetnames
+    finally:
+        blank_book.close()
+        sample_book.close()
+
+
+def test_demo_button_runs_analysis_without_upload():
+    """Örnek veri doğrudan state'e konur; yükleme adımı atlanır."""
+    test = _start_demo(_app())
+    text = _markdown(test)
+
+    assert "Genel özet" in text
+    assert "Örnek veri seti yüklü (demo)" in text
+    assert "Tedarikçi satırı: 35" in text
+    assert len(test.get("plotly_chart")) == 1
+    assert "Henüz dosya yüklenmedi" not in text
+    assert test.session_state["demo_file"]["suppliers"] == 35
+
+
+def test_demo_analysis_keeps_only_report_downloads():
+    """Demo etkinken panel indirmeleri analiz ekranına taşınmaz."""
+    test = _start_demo(_app())
+    labels = [button.label for button in test.download_button]
+
+    assert labels == ["Excel raporunu indir", "PDF raporunu indir"]
+
+
+def test_demo_comparison_view_shows_sample_findings():
+    test = _comparison(_start_demo(_app()))
+    text = _markdown(test)
+
+    assert _table_html(test)
+    assert len(test.get("plotly_chart")) == 2
+    for code in ("W-DLV-02", "W-SRC-01", "W-VAL-01", "I-SHIP-01"):
+        assert code in text
+
+
+def test_close_demo_returns_to_start_screen():
+    test = _start_demo(_app())
+    test.button(key="close-demo-active").click()
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+
+    text = _markdown(test)
+    assert "demo_file" not in test.session_state
+    assert "Henüz dosya yüklenmedi" in text
+    assert "Hızlı Başlangıç" in text
+    assert [button.label for button in test.button] == [
+        "🚀 Örnek Veri ile Hemen Dene (AI Demo)"
+    ]
+
+
+def test_user_upload_replaces_active_demo(tmp_path):
+    """Kullanıcı kendi dosyasını yüklediğinde demo oturumdan düşer."""
+    test = _start_demo(_app())
+    assert test.session_state["demo_file"]
+
+    test = _upload(test, _workbook_bytes(tmp_path))
+    text = _markdown(test)
+
+    assert "demo_file" not in test.session_state
+    assert "Örnek veri seti yüklü" not in text
+    assert "teklif.xlsx" in text
+    assert [button.label for button in test.download_button] == [
+        "Excel raporunu indir",
+        "PDF raporunu indir",
+    ]
+
+
+def test_demo_assets_are_generated_once_per_session():
+    """Panel yeniden çizildiğinde dosyalar bayt düzeyinde aynı kalır."""
+    test = _start_demo(_app())
+    first = test.session_state["demo_file"]["payload"]
+
+    test = _view(test, COMPARISON)
+    test = _view(test, DASHBOARD)
+
+    assert test.session_state["demo_file"]["payload"] == first
+
+
+def test_demo_stays_closable_when_its_workbook_is_unreadable():
+    """Bozuk bir demo dosyası oturumu kilitlemez; şerit kapatma sunar."""
+    test = _app()
+    test.session_state["demo_file"] = {
+        "name": "bozuk.xlsx",
+        "payload": b"bu bir calisma kitabi degil",
+        "suppliers": 1,
+    }
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+    assert "Dosya okunamadı" in _markdown(test)
+
+    test.button(key="close-demo-active").click()
+    test.run()
+    assert not test.exception, [str(e) for e in test.exception]
+    assert "demo_file" not in test.session_state
+    assert "Henüz dosya yüklenmedi" in _markdown(test)
 
 
 # --------------------------------------------------------------------------- #
