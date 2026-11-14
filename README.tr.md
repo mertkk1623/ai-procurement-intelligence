@@ -236,7 +236,7 @@ ai-procurement-intelligence/
 │   ├── ai_analysis.py              # Maskelenmiş istek üretimi ve AI yanıt doğrulaması
 │   ├── report.py                   # Excel ve PDF rapor üreticileri
 │   └── demo_data.py                # Boş şablon ve örnek çalışma kitabı üretimi (bellekte)
-└── tests/                          # 9 dosyada 504 test
+└── tests/                          # 9 dosyada 537 test
 ```
 
 ### Modül sorumlulukları
@@ -272,7 +272,7 @@ Ayrıştırıcı, mesajları kullanıcıya dönük ve dosya sistemi yollarından
 | `tests/test_demo_data.py` | Boş şablon sözleşmesi, örnek dosya geçerliliği, senaryo kapsamı, tarih sabitleme, AI gövdesi maskeleme |
 | `tests/test_smoke.py` | Paket içe aktarımı ve sürüm |
 
-Mevcut durum: **504 test**; bunların 331'i `unit`, 170'i `integration` olarak işaretlenmiştir, üç duman testi işaret taşımaz.
+Mevcut durum: **537 test**; bunların 364'ü `unit`, 170'i `integration` olarak işaretlenmiştir, üç duman testi işaret taşımaz.
 
 ### Sürekli entegrasyon
 
