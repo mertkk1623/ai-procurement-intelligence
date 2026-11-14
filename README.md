@@ -75,6 +75,7 @@ The AI analysis is an explanation layer, not a decision layer:
 - It does not produce a supplier ranking or select a winning bid.
 - It never receives the raw Excel file, the notes column, quote numbers or real supplier names. Payment terms are forwarded as typed, which is why that cell should not contain identifiers (see [Limitations](#limitations)).
 - If its response contains a number that cannot be matched to the verified source figures, the analysis is rejected and not displayed.
+- "Lowest" claims are verified per clause. One sentence can name two metrics ("lowest product cost, and on total cost …"), so each claim is compared against the metric in its own clause. "Product cost" counts as the product cost, not the total. A claim is rejected only when none of the suppliers named in its clause holds the mark; if the attribution is ambiguous, it stays silent.
 
 ---
 

@@ -75,6 +75,7 @@ Yapay zekâ analizi bir karar katmanı değil, açıklama katmanıdır:
 - Tedarikçi sıralaması üretmez, kazanan teklifi seçmez.
 - Ham Excel dosyasını, notlar sütununu, teklif numaralarını veya gerçek tedarikçi adlarını hiçbir zaman almaz. Ödeme koşulları girildiği biçimde iletilir; bu nedenle o hücreye tanımlayıcı yazılmamalıdır (bkz. [Mevcut Sınırlamalar](#mevcut-sınırlamalar)).
 - Yanıtında doğrulanmış kaynak sayılarla eşleşmeyen bir sayı bulunursa analiz reddedilir ve gösterilmez.
+- "En düşük" iddiaları yan cümle bazında doğrulanır. Tek cümlede iki ölçüt geçebilir ("ürün bedelinde en düşük, toplam maliyette ise …"); her iddia kendi yan cümlesindeki ölçütle karşılaştırılır. "Ürün maliyeti" ürün bedeli sayılır, toplam maliyet değil. Bir iddia yalnızca yan cümlesinde adı geçen tedarikçilerin **hiçbiri** o işareti taşımıyorsa reddedilir; atıf belirsizse sessiz kalınır.
 
 ---
 
